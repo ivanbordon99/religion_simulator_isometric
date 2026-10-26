@@ -32,12 +32,14 @@ int main(int argc, char** argv) {
         }
     }
 
+#if !defined(_WIN32)
     const char* displayEnv = std::getenv("DISPLAY");
     if (!displayEnv || std::string(displayEnv).empty()) {
         std::cout << "[Note] DISPLAY environment variable is not set. Switching to headless mode.\n"
                   << "       To run native window with GUI, run: DISPLAY=:0 ./bin/religion_sim\n";
         headless = true;
     }
+#endif
 
     ReligionSim::Game game(1280, 720);
     if (!game.init()) {

@@ -6,16 +6,10 @@
 #include <fstream>
 #include <iostream>
 #include <cstring>
+#include <iterator>
 #include <map>
 
-#if __has_include(<X11/Xlib.h>) && __has_include(<GL/gl.h>) && __has_include(<GL/glx.h>)
-#define HAS_X11_GL 1
-#include <X11/Xlib.h>
-#include <X11/Xutil.h>
-#include <X11/keysym.h>
-#include <GL/gl.h>
-#include <GL/glx.h>
-#elif defined(_WIN32)
+#if defined(_WIN32)
 #define HAS_WIN32 1
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -23,11 +17,35 @@
 #include <windows.h>
 #include <windowsx.h>
 #include <GL/gl.h>
+#elif __has_include(<X11/Xlib.h>) && __has_include(<GL/gl.h>) && __has_include(<GL/glx.h>)
+#define HAS_X11_GL 1
+#include <X11/Xlib.h>
+#include <X11/Xutil.h>
+#include <X11/keysym.h>
+#include <GL/gl.h>
+#include <GL/glx.h>
+#endif
+
+#ifdef HAS_WIN32
+LRESULT CALLBACK MainWndProc(HWND, UINT, WPARAM, LPARAM);
 #endif
 
 namespace ReligionSim {
 
 namespace {
+    constexpr int TERRAIN_ATLAS_WIDTH = 1024;
+    constexpr int TERRAIN_ATLAS_HEIGHT = 64;
+    constexpr int TERRAIN_TEXTURE_COUNT = 16;
+    constexpr std::array<const char*, 7> TERRAIN_PROP_PATHS{{
+        "assets/sprites/trees/pine_tree.rgba",
+        "assets/sprites/trees/deciduous_tree.rgba",
+        "assets/sprites/trees/bush1.rgba",
+        "assets/sprites/trees/bush2.rgba",
+        "assets/sprites/trees/bush3.rgba",
+        "assets/sprites/trees/bush4.rgba",
+        "assets/sprites/mountains/rock1.rgba"
+    }};
+
     // 5x7 ASCII bitmap font
     // 0-9, A-Z, space, colon, minus, plus, slash, period, percent
     const uint8_t FONT_DATA[96][5] = {
@@ -102,6 +120,7 @@ Renderer::Renderer(int width, int height)
     : m_width(width), m_height(height) {
     m_framebuffer.resize(width * height, 0xFF1A1210);
     loadMenuBackground();
+    loadSpaceBackground();
     loadCursor();
     loadTempleAndTerrainAssets();
     initUI();
@@ -156,6 +175,59 @@ void Renderer::loadMenuBackground() {
     }
 }
 
+void Renderer::loadSpaceBackground() {
+    constexpr int backgroundWidth = 256;
+    constexpr int backgroundHeight = 128;
+    const std::vector<std::string> paths = {
+        "assets/sprites/miscellany/space_background.rgba",
+        "../assets/sprites/miscellany/space_background.rgba",
+        "religion_simulator_isometric/assets/sprites/miscellany/space_background.rgba"
+    };
+
+    for (const auto& path : paths) {
+        std::ifstream file(path, std::ios::binary);
+        if (!file.is_open()) continue;
+
+        std::vector<uint8_t> raw(backgroundWidth * backgroundHeight * 4);
+        file.read(reinterpret_cast<char*>(raw.data()), static_cast<std::streamsize>(raw.size()));
+        if (file.gcount() != static_cast<std::streamsize>(raw.size())) {
+            continue;
+        }
+
+        m_spaceBackgroundPixels.resize(backgroundWidth * backgroundHeight);
+        for (size_t i = 0; i < m_spaceBackgroundPixels.size(); ++i) {
+            const uint8_t r = raw[i * 4];
+            const uint8_t g = raw[i * 4 + 1];
+            const uint8_t b = raw[i * 4 + 2];
+            const uint8_t a = raw[i * 4 + 3];
+            m_spaceBackgroundPixels[i] = (static_cast<uint32_t>(a) << 24) |
+                                          (static_cast<uint32_t>(b) << 16) |
+                                          (static_cast<uint32_t>(g) << 8) |
+                                          static_cast<uint32_t>(r);
+        }
+        std::cout << "[Renderer] Fondo espacial (256x128) cargado: " << path << std::endl;
+        return;
+    }
+}
+
+void Renderer::drawSpaceBackground() {
+    constexpr int backgroundWidth = 256;
+    constexpr int backgroundHeight = 128;
+    if (m_spaceBackgroundPixels.size() != backgroundWidth * backgroundHeight) {
+        return;
+    }
+
+    for (int y = 0; y < m_height; ++y) {
+        const int frameY = m_height - 1 - y;
+        const int srcY = y % backgroundHeight;
+        for (int x = 0; x < m_width; ++x) {
+            const int srcX = x % backgroundWidth;
+            m_framebuffer[frameY * m_width + x] =
+                m_spaceBackgroundPixels[srcY * backgroundWidth + srcX];
+        }
+    }
+}
+
 void Renderer::loadCursor() {
     std::vector<std::string> searchPaths = {
         "assets/ui/cursor_rts.rgba",
@@ -195,10 +267,10 @@ void Renderer::loadCursor() {
 void Renderer::loadTempleAndTerrainAssets() {
     // 1. Cargar sprite del Templo Prehistórico/Animista (128x128)
     std::vector<std::string> templePaths = {
-        "assets/sprites/temple_main.rgba",
-        "../assets/sprites/temple_main.rgba",
-        "religion_simulator_isometric/assets/sprites/temple_main.rgba",
-        "/home/Ivancho/Documentos/religion_simulator_isometric/assets/sprites/temple_main.rgba"
+        "assets/sprites/buildings/temple_main.rgba",
+        "../assets/sprites/buildings/temple_main.rgba",
+        "religion_simulator_isometric/assets/sprites/buildings/temple_main.rgba",
+        "/home/Ivancho/Documentos/religion_simulator_isometric/assets/sprites/buildings/temple_main.rgba"
     };
     for (const auto& path : templePaths) {
         std::ifstream file(path, std::ios::binary);
@@ -226,12 +298,12 @@ void Renderer::loadTempleAndTerrainAssets() {
         }
     }
 
-    // 2. Cargar Atlas de Terreno y Vegetación (512x128)
+    // 2. Cargar atlas exclusivo de terreno (1024x64).
     std::vector<std::string> terrainPaths = {
-        "assets/sprites/terrain_atlas.rgba",
-        "../assets/sprites/terrain_atlas.rgba",
-        "religion_simulator_isometric/assets/sprites/terrain_atlas.rgba",
-        "/home/Ivancho/Documentos/religion_simulator_isometric/assets/sprites/terrain_atlas.rgba"
+        "assets/sprites/terrain/terrain_atlas.rgba",
+        "../assets/sprites/terrain/terrain_atlas.rgba",
+        "religion_simulator_isometric/assets/sprites/terrain/terrain_atlas.rgba",
+        "/home/Ivancho/Documentos/religion_simulator_isometric/assets/sprites/terrain/terrain_atlas.rgba"
     };
     for (const auto& path : terrainPaths) {
         std::ifstream file(path, std::ios::binary);
@@ -239,11 +311,11 @@ void Renderer::loadTempleAndTerrainAssets() {
             file.seekg(0, std::ios::end);
             size_t size = file.tellg();
             file.seekg(0, std::ios::beg);
-            if (size == 512 * 128 * 4) {
+            if (size == TERRAIN_ATLAS_WIDTH * TERRAIN_ATLAS_HEIGHT * 4) {
                 std::vector<uint8_t> raw(size);
                 file.read(reinterpret_cast<char*>(raw.data()), size);
-                m_terrainAtlasPixels.resize(512 * 128);
-                for (size_t i = 0; i < 512 * 128; ++i) {
+                m_terrainAtlasPixels.resize(TERRAIN_ATLAS_WIDTH * TERRAIN_ATLAS_HEIGHT);
+                for (size_t i = 0; i < m_terrainAtlasPixels.size(); ++i) {
                     uint8_t r = raw[i * 4 + 0];
                     uint8_t g = raw[i * 4 + 1];
                     uint8_t b = raw[i * 4 + 2];
@@ -253,17 +325,52 @@ void Renderer::loadTempleAndTerrainAssets() {
                                               (static_cast<uint32_t>(g) << 8)  |
                                                static_cast<uint32_t>(r);
                 }
-                std::cout << "[Renderer] TileSet de Terreno (512x128) cargado exitosamente: " << path << std::endl;
+                std::cout << "[Renderer] Atlas de terreno (1024x64) cargado exitosamente: " << path << std::endl;
                 break;
             }
         }
     }
 
+    for (size_t propIndex = 0; propIndex < TERRAIN_PROP_PATHS.size(); ++propIndex) {
+        std::vector<std::string> propPaths = {
+            TERRAIN_PROP_PATHS[propIndex],
+            std::string("../") + TERRAIN_PROP_PATHS[propIndex],
+            std::string("religion_simulator_isometric/") + TERRAIN_PROP_PATHS[propIndex],
+            std::string("/home/Ivancho/Documentos/religion_simulator_isometric/") + TERRAIN_PROP_PATHS[propIndex]
+        };
+        bool loaded = false;
+        for (const auto& path : propPaths) {
+            std::ifstream file(path, std::ios::binary);
+            if (!file.is_open()) continue;
+            file.seekg(0, std::ios::end);
+            if (file.tellg() != static_cast<std::streamoff>(64u * 64u * 4u)) continue;
+            file.seekg(0, std::ios::beg);
+            std::vector<uint8_t> raw(64u * 64u * 4u);
+            file.read(reinterpret_cast<char*>(raw.data()), static_cast<std::streamsize>(raw.size()));
+            if (file.gcount() != static_cast<std::streamsize>(raw.size())) continue;
+
+            auto& pixels = m_terrainPropPixels[propIndex];
+            pixels.resize(64u * 64u);
+            for (size_t i = 0; i < pixels.size(); ++i) {
+                pixels[i] = (static_cast<uint32_t>(raw[i * 4 + 3]) << 24) |
+                            (static_cast<uint32_t>(raw[i * 4 + 2]) << 16) |
+                            (static_cast<uint32_t>(raw[i * 4 + 1]) << 8) |
+                            static_cast<uint32_t>(raw[i * 4]);
+            }
+            loaded = true;
+            break;
+        }
+        if (!loaded) {
+            std::cerr << "[Renderer] No se pudo cargar el sprite de terreno: "
+                      << TERRAIN_PROP_PATHS[propIndex] << std::endl;
+        }
+    }
+
     // 3. Cargar hoja de sprites del Chamán Sagrado (256x256, cuadrícula 4x4 de 64x64)
-    if (!m_shamanTileSet.cargarDesdeArchivo("assets/sprites/chaman_sheet.rgba")) {
-        if (!m_shamanTileSet.cargarDesdeArchivo("../assets/sprites/chaman_sheet.rgba")) {
-            if (!m_shamanTileSet.cargarDesdeArchivo("religion_simulator_isometric/assets/sprites/chaman_sheet.rgba")) {
-                m_shamanTileSet.cargarDesdeArchivo("/home/Ivancho/Documentos/religion_simulator_isometric/assets/sprites/chaman_sheet.rgba");
+    if (!m_shamanTileSet.cargarDesdeArchivo("assets/sprites/units/shaman/chaman_sheet.rgba")) {
+        if (!m_shamanTileSet.cargarDesdeArchivo("../assets/sprites/units/shaman/chaman_sheet.rgba")) {
+            if (!m_shamanTileSet.cargarDesdeArchivo("religion_simulator_isometric/assets/sprites/units/shaman/chaman_sheet.rgba")) {
+                m_shamanTileSet.cargarDesdeArchivo("/home/Ivancho/Documentos/religion_simulator_isometric/assets/sprites/units/shaman/chaman_sheet.rgba");
             }
         }
     }
@@ -631,12 +738,10 @@ bool Renderer::initWindow(const std::string& title) {
     HINSTANCE hInstance = GetModuleHandleA(NULL);
     const char* className = "ReligionSimWindowClass";
 
-    extern LRESULT CALLBACK MainWndProc(HWND, UINT, WPARAM, LPARAM);
-
     WNDCLASSEXA wc{};
     wc.cbSize = sizeof(WNDCLASSEXA);
     wc.style = CS_HREDRAW | CS_VREDRAW | CS_OWNDC;
-    wc.lpfnWndProc = MainWndProc;
+    wc.lpfnWndProc = ::MainWndProc;
     wc.hInstance = hInstance;
     wc.hCursor = NULL;
     wc.lpszClassName = className;
@@ -726,6 +831,7 @@ void Renderer::closeWindow() {
 
 void Renderer::beginFrame() {
     clear(ColorRGB(14, 18, 28)); // Deep cosmic obsidian
+    drawSpaceBackground();
 }
 
 void Renderer::endFrame() {
@@ -831,7 +937,8 @@ void Renderer::drawFilledDiamond(float cx, float cy, float halfW, float halfH,
 void Renderer::drawTexturedDiamond(float cx, float cy, float halfW, float halfH,
                                    int texIndex, ColorRGB tintColor, float tintStrength,
                                    ColorRGB skirtColor, float skirtH) {
-    if (m_terrainAtlasPixels.size() != 512 * 128 || texIndex < 0 || texIndex >= 8) {
+    if (m_terrainAtlasPixels.size() != TERRAIN_ATLAS_WIDTH * TERRAIN_ATLAS_HEIGHT ||
+        texIndex < 0 || texIndex >= TERRAIN_TEXTURE_COUNT) {
         drawFilledDiamond(cx, cy, halfW, halfH, tintColor, skirtColor, skirtH);
         return;
     }
@@ -850,16 +957,16 @@ void Renderer::drawTexturedDiamond(float cx, float cy, float halfW, float halfH,
 
         float relY = (static_cast<float>(py) - cy) / halfH;
         float dy = std::abs(relY);
+        int ty = std::clamp(static_cast<int>((relY + 1.0f) * 16.0f), 0, 31);
 
         for (int px = minX; px <= maxX; ++px) {
             float relX = (static_cast<float>(px) - cx) / halfW;
             float dx = std::abs(relX);
 
             if (dx + dy <= 1.0f) {
-                int tx = px & 63;
-                int ty = py & 63;
+                int tx = std::clamp(static_cast<int>((relX + 1.0f) * 32.0f), 0, 63);
 
-                uint32_t texel = m_terrainAtlasPixels[ty * 512 + baseTexX + tx];
+                uint32_t texel = m_terrainAtlasPixels[ty * TERRAIN_ATLAS_WIDTH + baseTexX + tx];
                 uint8_t tr = texel & 0xFF;
                 uint8_t tg = (texel >> 8) & 0xFF;
                 uint8_t tb = (texel >> 16) & 0xFF;
@@ -881,7 +988,9 @@ void Renderer::drawTexturedDiamond(float cx, float cy, float halfW, float halfH,
 }
 
 void Renderer::drawTerrainProp(float cx, float cy, int propIndex, float zoom) {
-    if (m_terrainAtlasPixels.size() != 512 * 128 || propIndex < 0 || propIndex >= 7) return;
+    if (propIndex < 0 || propIndex >= static_cast<int>(m_terrainPropPixels.size())) return;
+    const auto& propPixels = m_terrainPropPixels[static_cast<size_t>(propIndex)];
+    if (propPixels.size() != 64u * 64u) return;
 
     float scale = std::clamp(zoom * 0.42f, 0.18f, 1.15f);
     int destW = static_cast<int>(64.0f * scale);
@@ -890,9 +999,6 @@ void Renderer::drawTerrainProp(float cx, float cy, int propIndex, float zoom) {
 
     int startX = static_cast<int>(cx - destW * 0.5f);
     int startY = static_cast<int>(cy + 6.0f * zoom - destH);
-    const int baseX = propIndex * 64;
-    const int baseY = 64;
-
     // Sombra suave en la base de la vegetación/roca para integrarla con el terreno
     int shadowRx = std::max(3, static_cast<int>(10.0f * zoom));
     int shadowRy = std::max(2, static_cast<int>(5.0f * zoom));
@@ -921,14 +1027,14 @@ void Renderer::drawTerrainProp(float cx, float cy, int propIndex, float zoom) {
         int frameY = m_height - 1 - dstY;
         if (frameY < 0 || frameY >= m_height) continue;
 
-        int sy = baseY + std::clamp(static_cast<int>(dy / scale), 0, 63);
+        int sy = std::clamp(static_cast<int>(dy / scale), 0, 63);
 
         for (int dx = 0; dx < destW; ++dx) {
             int dstX = startX + dx;
             if (dstX < 0 || dstX >= m_width) continue;
 
-            int sx = baseX + std::clamp(static_cast<int>(dx / scale), 0, 63);
-            uint32_t src = m_terrainAtlasPixels[sy * 512 + sx];
+            int sx = std::clamp(static_cast<int>(dx / scale), 0, 63);
+            uint32_t src = propPixels[static_cast<size_t>(sy) * 64u + static_cast<size_t>(sx)];
             uint8_t a = (src >> 24) & 0xFF;
             if (a < 20) continue;
 
@@ -1206,21 +1312,21 @@ void Renderer::renderWorld(const WorldMap& map, const ReligionRegistry& registry
     auto getCellTexIdx = [&](int cx, int cy) -> int {
         const Cell& cell = map.getCell(cx, cy);
         switch (cell.biome) {
-            case BiomeType::DeepOcean:      return 4; // Agua Profunda continua
-            case BiomeType::ShallowWater:   return 3; // Agua Transitional turquesa continua
+            case BiomeType::DeepOcean:      return 13;
+            case BiomeType::ShallowWater:   return 10;
             case BiomeType::CoastalPlains:  return 2; // Pradera costera suave
             case BiomeType::FertileValley:  return 0; // Pasto (Grass) - Base continuo
             case BiomeType::DenseForest:    return 5; // Pasto rico de bosque
-            case BiomeType::HighlandHills:
-            case BiomeType::RuggedMountains:
-            case BiomeType::AridDesert:
-            case BiomeType::FrozenTundra:
-            default:                        return 6; // Pastizal alto / colina
+            case BiomeType::HighlandHills:  return 6; // Pastizal alto / colina
+            case BiomeType::AridDesert:     return 8;
+            case BiomeType::RuggedMountains:return 1; // Suelo rocoso
+            case BiomeType::FrozenTundra:   return 9; // Arena clara / nieve
+            default:                        return 6;
         }
     };
 
     auto sampleAtlasRGB = [&](int tIdx, int wx, int wy, float& outR, float& outG, float& outB) {
-        uint32_t texel = m_terrainAtlasPixels[(wy & 63) * 512 + (tIdx * 64) + (wx & 63)];
+        uint32_t texel = m_terrainAtlasPixels[(wy & 63) * TERRAIN_ATLAS_WIDTH + (tIdx * 64) + (wx & 63)];
         outR = static_cast<float>(texel & 0xFF);
         outG = static_cast<float>((texel >> 8) & 0xFF);
         outB = static_cast<float>((texel >> 16) & 0xFF);
@@ -1265,7 +1371,21 @@ void Renderer::renderWorld(const WorldMap& map, const ReligionRegistry& registry
 
             const Cell& c = map.getCell(x, y);
             Vec2 screenPt = camera.gridTileCenterScreen(x, y, c.elevation);
-            float skirtH = (c.isWater() ? 3.0f : std::max(8.0f, c.elevation * ELEVATION_STEP + 4.0f)) * zoom;
+            float frontDrop = 0.0f;
+            if (!c.isWater()) {
+                if (x + 1 < w) {
+                    frontDrop = std::max(frontDrop, c.elevation - map.getCell(x + 1, y).elevation);
+                } else {
+                    frontDrop = std::max(frontDrop, c.elevation);
+                }
+                if (y + 1 < h) {
+                    frontDrop = std::max(frontDrop, c.elevation - map.getCell(x, y + 1).elevation);
+                } else {
+                    frontDrop = std::max(frontDrop, c.elevation);
+                }
+            }
+            float skirtH = std::max(0.0f, frontDrop * ELEVATION_STEP) * zoom;
+            if (skirtH < zoom) skirtH = 0.0f;
 
             // Frustum culling
             if (screenPt.x + halfW < 0 || screenPt.x - halfW > m_width ||
@@ -1304,7 +1424,7 @@ void Renderer::renderWorld(const WorldMap& map, const ReligionRegistry& registry
                 }
             }
 
-            if (m_terrainAtlasPixels.size() != 512 * 128) {
+            if (m_terrainAtlasPixels.size() != TERRAIN_ATLAS_WIDTH * TERRAIN_ATLAS_HEIGHT) {
                 drawFilledDiamond(screenPt.x, screenPt.y, halfW, halfH, overlayColor, Palette::DIRT_EARTH, skirtH);
             } else {
                 int minX = std::max(0, static_cast<int>(std::floor(screenPt.x - halfW)));
@@ -1312,15 +1432,12 @@ void Renderer::renderWorld(const WorldMap& map, const ReligionRegistry& registry
                 int minY = std::max(0, static_cast<int>(std::floor(screenPt.y - halfH)));
                 int maxY = std::min(m_height - 1, static_cast<int>(std::ceil(screenPt.y + halfH + skirtH)));
 
-                float elevOffsetPx = c.elevation * ELEVATION_STEP * zoom;
-
                 for (int py = minY; py <= maxY; ++py) {
                     int frameY = m_height - 1 - py;
                     if (frameY < 0 || frameY >= m_height) continue;
 
                     float relY = (static_cast<float>(py) - screenPt.y) / halfH;
                     float dy = std::abs(relY);
-                    int wy = static_cast<int>(std::floor((static_cast<float>(py) - camY + elevOffsetPx) / zoom)) & 63;
 
                     for (int px = minX; px <= maxX; ++px) {
                         float relX = (static_cast<float>(px) - screenPt.x) / halfW;
@@ -1328,7 +1445,8 @@ void Renderer::renderWorld(const WorldMap& map, const ReligionRegistry& registry
                         float diamondDist = dx + dy;
 
                         if (diamondDist <= 1.045f) {
-                            int wx = static_cast<int>(std::floor((static_cast<float>(px) - camX) / zoom)) & 63;
+                            int wx = std::clamp(static_cast<int>((relX + 1.0f) * 32.0f), 0, 63);
+                            int wy = std::clamp(static_cast<int>((relY + 1.0f) * 16.0f), 0, 31);
 
                             float r, g, b;
                             sampleAtlasRGB(texIdx, wx, wy, r, g, b);
@@ -1337,36 +1455,30 @@ void Renderer::renderWorld(const WorldMap& map, const ReligionRegistry& registry
                             float du = (relX + relY) * 0.5f;
                             float dv = (relY - relX) * 0.5f;
 
-                            // 1. Transición suave C0 entre biomas vecinos del mismo medio (agua-agua o tierra-tierra)
+                            auto blendBiomeEdge = [&](float edgeDistance, int neighborTexture) {
+                                if (neighborTexture == texIdx) return;
+                                const float t = std::clamp((edgeDistance - 0.12f) / 0.38f, 0.0f, 1.0f);
+                                const float weight = t * t * (3.0f - 2.0f * t) * 0.34f;
+                                if (weight <= 0.0f) return;
+
+                                float nr, ng, nb;
+                                sampleAtlasRGB(neighborTexture, wx, wy, nr, ng, nb);
+                                r = r * (1.0f - weight) + nr * weight;
+                                g = g * (1.0f - weight) + ng * weight;
+                                b = b * (1.0f - weight) + nb * weight;
+                            };
+
+                            // Mezclar biomas cercanos con una transición amplia y suave, sin variar
+                            // arbitrariamente la textura de todas las celdas de una misma región.
                             if (du < -0.15f && nbTexXNeg != texIdx) {
-                                float wBlend = std::clamp((-0.15f - du) / 0.35f, 0.0f, 1.0f) * 0.5f;
-                                float nr, ng, nb;
-                                sampleAtlasRGB(nbTexXNeg, wx, wy, nr, ng, nb);
-                                r = r * (1.0f - wBlend) + nr * wBlend;
-                                g = g * (1.0f - wBlend) + ng * wBlend;
-                                b = b * (1.0f - wBlend) + nb * wBlend;
+                                blendBiomeEdge(-du, nbTexXNeg);
                             } else if (du > 0.15f && nbTexXPos != texIdx) {
-                                float wBlend = std::clamp((du - 0.15f) / 0.35f, 0.0f, 1.0f) * 0.5f;
-                                float nr, ng, nb;
-                                sampleAtlasRGB(nbTexXPos, wx, wy, nr, ng, nb);
-                                r = r * (1.0f - wBlend) + nr * wBlend;
-                                g = g * (1.0f - wBlend) + ng * wBlend;
-                                b = b * (1.0f - wBlend) + nb * wBlend;
+                                blendBiomeEdge(du, nbTexXPos);
                             }
                             if (dv < -0.15f && nbTexYNeg != texIdx) {
-                                float wBlend = std::clamp((-0.15f - dv) / 0.35f, 0.0f, 1.0f) * 0.5f;
-                                float nr, ng, nb;
-                                sampleAtlasRGB(nbTexYNeg, wx, wy, nr, ng, nb);
-                                r = r * (1.0f - wBlend) + nr * wBlend;
-                                g = g * (1.0f - wBlend) + ng * wBlend;
-                                b = b * (1.0f - wBlend) + nb * wBlend;
+                                blendBiomeEdge(-dv, nbTexYNeg);
                             } else if (dv > 0.15f && nbTexYPos != texIdx) {
-                                float wBlend = std::clamp((dv - 0.15f) / 0.35f, 0.0f, 1.0f) * 0.5f;
-                                float nr, ng, nb;
-                                sampleAtlasRGB(nbTexYPos, wx, wy, nr, ng, nb);
-                                r = r * (1.0f - wBlend) + nr * wBlend;
-                                g = g * (1.0f - wBlend) + ng * wBlend;
-                                b = b * (1.0f - wBlend) + nb * wBlend;
+                                blendBiomeEdge(dv, nbTexYPos);
                             }
 
                             // 2. Transición natural de costa (orilla de tierra/arena y espuma de olas en el agua)

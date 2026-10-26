@@ -10,6 +10,7 @@ set(COMMON_SOURCES
     src/IsometricCamera.cpp
     src/Religion.cpp
     src/Cell.cpp
+    src/MultiNoiseBiome.cpp
     src/WorldMap.cpp
     src/AdvancementSystem.cpp
     src/ReplicationEngine.cpp

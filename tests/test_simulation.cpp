@@ -1,5 +1,6 @@
 #include "IsometricCamera.hpp"
 #include "WorldMap.hpp"
+#include "MultiNoiseBiome.hpp"
 #include "Religion.hpp"
 #include "AdvancementSystem.hpp"
 #include "ReplicationEngine.hpp"
@@ -9,11 +10,16 @@
 #include "Villager.hpp"
 #include "TileSet.hpp"
 #include "Humano.hpp"
+#include "Renderer.hpp"
 #include "TimeEngine.hpp"
 #include "UISystem.hpp"
 #include <iostream>
 #include <cassert>
 #include <cmath>
+#include <cstdint>
+#include <fstream>
+#include <iterator>
+#include <vector>
 
 void testIsometricCamera() {
     std::cout << "[Test] Running testIsometricCamera..." << std::endl;
@@ -66,7 +72,115 @@ void testWorldMap() {
     float travel = map.getTravelEase(cWater, cLand);
     assert(travel > 0.0f);
 
+    ReligionSim::WorldMap sameSeedMap(32, 32);
+    sameSeedMap.generateProceduralWorld(12345);
+    int habitableCells = 0;
+    int isolatedBiomeCells = 0;
+    for (int y = 0; y < map.getHeight(); ++y) {
+        for (int x = 0; x < map.getWidth(); ++x) {
+            const auto& cell = map.getCell(x, y);
+            const auto& matchingCell = sameSeedMap.getCell(x, y);
+            assert(cell.biome == matchingCell.biome);
+            assert(cell.elevation == matchingCell.elevation);
+            assert(cell.climate.primary_biome == matchingCell.climate.primary_biome);
+            assert(cell.climate.secondary_biome == matchingCell.climate.secondary_biome);
+            assert(cell.climate.blend_factor == matchingCell.climate.blend_factor);
+            assert(cell.climate.elevation >= -1.0f && cell.climate.elevation <= 1.0f);
+            assert(cell.climate.temperature >= -1.0f && cell.climate.temperature <= 1.0f);
+            assert(cell.climate.moisture >= -1.0f && cell.climate.moisture <= 1.0f);
+            assert(cell.climate.blend_factor >= 0.0f && cell.climate.blend_factor <= 1.0f);
+
+            if (cell.isWater()) continue;
+            ++habitableCells;
+            bool hasMatchingNeighbor = false;
+            for (const auto& neighbor : map.getNeighbors(x, y, true)) {
+                if (map.getCell(neighbor.x, neighbor.y).biome == cell.biome) {
+                    hasMatchingNeighbor = true;
+                    break;
+                }
+            }
+            if (!hasMatchingNeighbor) ++isolatedBiomeCells;
+        }
+    }
+    assert(habitableCells > 0);
+    assert(habitableCells >= (map.getWidth() * map.getHeight()) / 4);
+    assert(habitableCells <= (map.getWidth() * map.getHeight()) * 4 / 5);
+    assert(isolatedBiomeCells * 10 < habitableCells);
+
+    for (uint32_t seed : {42u, 999u, 1234567u}) {
+        ReligionSim::WorldMap cohesionMap(48, 48);
+        cohesionMap.generateProceduralWorld(seed);
+        int landCells = 0;
+        int isolatedCells = 0;
+        int matchingLandEdges = 0;
+        int totalLandEdges = 0;
+        bool representedLandBiomes[9]{};
+
+        for (int y = 0; y < cohesionMap.getHeight(); ++y) {
+            for (int x = 0; x < cohesionMap.getWidth(); ++x) {
+                const auto& cell = cohesionMap.getCell(x, y);
+                if (cell.isWater()) continue;
+                ++landCells;
+                representedLandBiomes[static_cast<size_t>(cell.biome)] = true;
+
+                int sameNeighbors = 0;
+                for (const auto& neighbor : cohesionMap.getNeighbors(x, y, true)) {
+                    const auto& adjacent = cohesionMap.getCell(neighbor.x, neighbor.y);
+                    if (adjacent.isWater()) continue;
+                    ++totalLandEdges;
+                    if (adjacent.biome == cell.biome) {
+                        ++sameNeighbors;
+                        ++matchingLandEdges;
+                    }
+                }
+                if (sameNeighbors == 0) ++isolatedCells;
+            }
+        }
+
+        int biomeCount = 0;
+        for (bool represented : representedLandBiomes) {
+            if (represented) ++biomeCount;
+        }
+        assert(landCells >= (48 * 48) / 4 && landCells <= (48 * 48) * 4 / 5);
+        assert(biomeCount >= 3);
+        assert(isolatedCells * 20 < landCells);
+        assert(matchingLandEdges * 100 >= totalLandEdges * 60);
+    }
+
     std::cout << "  -> testWorldMap PASSED! Total Pop: " << totalPop << std::endl;
+}
+
+void testMultiNoiseBiomeGenerator() {
+    std::cout << "[Test] Running testMultiNoiseBiomeGenerator..." << std::endl;
+    const float firstNoise = ReligionSim::sample_noise(0.25f, -0.4f, 3.0f, 1234);
+    assert(firstNoise >= -1.0f && firstNoise <= 1.0f);
+    assert(firstNoise == ReligionSim::sample_noise(0.25f, -0.4f, 3.0f, 1234));
+    assert(firstNoise != ReligionSim::sample_noise(0.25f, -0.4f, 3.0f, 4321));
+
+    assert(std::abs(ReligionSim::MultiNoiseBiomeGenerator::applyOrographicCooling(0.4f, 0.5f) -
+                    0.19f) < 0.0001f);
+
+    bool seenBiomes[static_cast<size_t>(ReligionSim::BiomeID::Count)]{};
+    for (const auto& target : ReligionSim::MultiNoiseBiomeGenerator::BIOME_TARGETS) {
+        const auto selected = ReligionSim::MultiNoiseBiomeGenerator::selectBiome(
+            target.target_temperature, target.target_moisture, target.target_elevation);
+        assert(selected.primary_biome == target.id);
+        assert(selected.secondary_biome != selected.primary_biome);
+        assert(selected.blend_factor >= 0.0f && selected.blend_factor <= 1.0f);
+        seenBiomes[static_cast<size_t>(target.id)] = true;
+    }
+    for (bool seen : seenBiomes) assert(seen);
+
+    const auto tile = ReligionSim::MultiNoiseBiomeGenerator::sample(12, 19, 48, 48, 9876);
+    const auto repeat = ReligionSim::MultiNoiseBiomeGenerator::sample(12, 19, 48, 48, 9876);
+    assert(tile.primary_biome == repeat.primary_biome);
+    assert(tile.secondary_biome == repeat.secondary_biome);
+    assert(tile.blend_factor == repeat.blend_factor);
+    assert(tile.elevation >= -1.0f && tile.elevation <= 1.0f);
+    assert(tile.temperature >= -1.0f && tile.temperature <= 1.0f);
+    assert(tile.moisture >= -1.0f && tile.moisture <= 1.0f);
+
+    std::cout << "  -> testMultiNoiseBiomeGenerator PASSED!" << std::endl;
 }
 
 void testReligionAndAgglutination() {
@@ -336,6 +450,80 @@ void testModularUISystem() {
     std::cout << "  -> testModularUISystem PASSED! NinePatch and Liturgical widgets verified." << std::endl;
 }
 
+void testExpandedTerrainAtlas() {
+    std::cout << "[Test] Running testExpandedTerrainAtlas..." << std::endl;
+    std::ifstream atlasFile("assets/sprites/terrain/terrain_atlas.rgba", std::ios::binary);
+    if (!atlasFile.is_open()) {
+        atlasFile.open("../assets/sprites/terrain/terrain_atlas.rgba", std::ios::binary);
+    }
+    assert(atlasFile.is_open());
+    std::vector<uint8_t> atlasPixels(
+        (std::istreambuf_iterator<char>(atlasFile)),
+        std::istreambuf_iterator<char>());
+    assert(atlasPixels.size() == 1024u * 64u * 4u);
+
+    ReligionSim::Renderer renderer(300, 140);
+    for (int textureIndex = 8; textureIndex < 16; ++textureIndex) {
+        renderer.clear({0, 0, 0});
+        renderer.drawTexturedDiamond(
+            32.0f, 32.0f, 24.0f, 12.0f, textureIndex,
+            {255, 0, 255}, 0.0f, {0, 0, 0}, 0.0f);
+        renderer.drawTexturedDiamond(
+            100.0f, 80.0f, 24.0f, 12.0f, textureIndex,
+            {255, 0, 255}, 0.0f, {0, 0, 0}, 0.0f);
+
+        const size_t atlasOffset =
+            (16u * 1024u + static_cast<size_t>(textureIndex * 64 + 32)) * 4u;
+        const uint32_t expectedPixel =
+            0xFF000000u |
+            (static_cast<uint32_t>(atlasPixels[atlasOffset + 2]) << 16) |
+            (static_cast<uint32_t>(atlasPixels[atlasOffset + 1]) << 8) |
+            static_cast<uint32_t>(atlasPixels[atlasOffset]);
+        const auto& framebuffer = renderer.getFramebuffer();
+        const uint32_t firstRenderedPixel = framebuffer[(140u - 1u - 32u) * 300u + 32u];
+        const uint32_t secondRenderedPixel = framebuffer[(140u - 1u - 80u) * 300u + 100u];
+        assert(firstRenderedPixel == expectedPixel);
+        assert(secondRenderedPixel == expectedPixel);
+    }
+
+    renderer.clear({10, 10, 10});
+    renderer.drawTerrainProp(150.0f, 70.0f, 0, 1.0f);
+    bool renderedPropPixel = false;
+    for (int y = 50; y < 66; ++y) {
+        for (int x = 137; x < 163; ++x) {
+            const size_t offset = (139u - static_cast<size_t>(y)) * 300u + static_cast<size_t>(x);
+            if (renderer.getFramebuffer()[offset] != 0xFF0A0A0Au) {
+                renderedPropPixel = true;
+                break;
+            }
+        }
+        if (renderedPropPixel) break;
+    }
+    assert(renderedPropPixel);
+
+    std::ifstream backgroundFile("assets/sprites/miscellany/space_background.rgba", std::ios::binary);
+    if (!backgroundFile.is_open()) {
+        backgroundFile.open("../assets/sprites/miscellany/space_background.rgba", std::ios::binary);
+    }
+    assert(backgroundFile.is_open());
+    std::vector<uint8_t> backgroundPixels(
+        (std::istreambuf_iterator<char>(backgroundFile)),
+        std::istreambuf_iterator<char>());
+    assert(backgroundPixels.size() == 256u * 128u * 4u);
+
+    renderer.beginFrame();
+    const size_t backgroundOffset = (2u * 256u + 4u) * 4u;
+    const uint32_t expectedBackgroundPixel =
+        0xFF000000u |
+        (static_cast<uint32_t>(backgroundPixels[backgroundOffset + 2]) << 16) |
+        (static_cast<uint32_t>(backgroundPixels[backgroundOffset + 1]) << 8) |
+        static_cast<uint32_t>(backgroundPixels[backgroundOffset]);
+    const uint32_t renderedBackgroundPixel = renderer.getFramebuffer()[(140u - 1u - 130u) * 300u + 260u];
+    assert(renderedBackgroundPixel == expectedBackgroundPixel);
+
+    std::cout << "  -> testExpandedTerrainAtlas PASSED! All eight new terrain textures render correctly." << std::endl;
+}
+
 void testFirstEraAIController() {
     std::cout << "[Test] Running testFirstEraAIController (First Era Realistic AI)..." << std::endl;
     FirstEraAIController ai;
@@ -376,6 +564,23 @@ void testFirstEraAIController() {
     pop.unityWill = 70.0f;
     ai.UpdateRealisticBehavior(pop, ctx, 1.0f);
     assert(pop.state == RealisticVillagerState::COMMUNAL_BONDING);
+
+    // 5. El desierto eleva el umbral de hambre y reduce la recuperación de comida.
+    ctx.currentBiome = ReligionSim::BiomeType::AridDesert;
+    ctx.environmentalCarryingCapacity = 30.0f;
+    ctx.hasShrine = false;
+    pop.foodSupply = 50.0f;
+    pop.divineWill = 50.0f;
+    const float desertFoodBefore = pop.foodSupply;
+    ai.UpdateRealisticBehavior(pop, ctx, 1.0f);
+    assert(pop.state == RealisticVillagerState::SURVIVAL_FORAGING);
+    assert(pop.foodSupply > desertFoodBefore);
+    assert(pop.foodSupply < desertFoodBefore + 4.0f);
+
+    // 6. Entradas inválidas no avanzan la simulación.
+    const float foodBeforeInvalidStep = pop.foodSupply;
+    ai.UpdateRealisticBehavior(pop, ctx, -1.0f);
+    assert(pop.foodSupply == foodBeforeInvalidStep);
 
     std::cout << "  -> testFirstEraAIController PASSED! 5 realistic autonomous states verified." << std::endl;
 }
@@ -523,6 +728,7 @@ int main() {
     std::cout << "========================================" << std::endl;
 
     testIsometricCamera();
+    testMultiNoiseBiomeGenerator();
     testWorldMap();
     testReligionAndAgglutination();
     testReplicationAndSimulationCycle();
@@ -530,6 +736,7 @@ int main() {
     testObjetoHumanoYTileSet();
     testTimeEngineDecoupledScaling();
     testModularUISystem();
+    testExpandedTerrainAtlas();
     testFirstEraAIController();
     testHumanAIController();
     testFaithFeedbackAndCombatDamage();

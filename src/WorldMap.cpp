@@ -1,9 +1,145 @@
 #include "WorldMap.hpp"
 #include <cmath>
-#include <random>
 #include <algorithm>
 
 namespace ReligionSim {
+
+namespace {
+
+bool isWaterBiome(BiomeType biome) {
+    return biome == BiomeType::DeepOcean || biome == BiomeType::ShallowWater;
+}
+
+BiomeType mapBiomeID(BiomeID biome) {
+    switch (biome) {
+        case BiomeID::Ocean:              return BiomeType::DeepOcean;
+        case BiomeID::Coast:              return BiomeType::ShallowWater;
+        case BiomeID::Desert:             return BiomeType::AridDesert;
+        case BiomeID::Savanna:             return BiomeType::CoastalPlains;
+        case BiomeID::Plains:              return BiomeType::FertileValley;
+        case BiomeID::TemperateForest:     return BiomeType::DenseForest;
+        case BiomeID::Taiga:               return BiomeType::FrozenTundra;
+        case BiomeID::TropicalRainforest:  return BiomeType::DenseForest;
+        case BiomeID::SnowyMountain:       return BiomeType::FrozenTundra;
+        case BiomeID::RockyPeak:           return BiomeType::RuggedMountains;
+        case BiomeID::Count:               break;
+    }
+    return BiomeType::FertileValley;
+}
+
+std::vector<BiomeType> smoothBiomeRegions(const std::vector<BiomeType>& source, int width, int height) {
+    std::vector<BiomeType> current = source;
+    for (int pass = 0; pass < 3; ++pass) {
+        std::vector<BiomeType> next = current;
+        for (int y = 0; y < height; ++y) {
+            for (int x = 0; x < width; ++x) {
+                const size_t index = static_cast<size_t>(y * width + x);
+                const BiomeType biome = current[index];
+                int scores[9]{};
+                scores[static_cast<size_t>(biome)] += 3;
+
+                for (int oy = -1; oy <= 1; ++oy) {
+                    for (int ox = -1; ox <= 1; ++ox) {
+                        if (ox == 0 && oy == 0) continue;
+                        const int nx = x + ox;
+                        const int ny = y + oy;
+                        if (nx < 0 || nx >= width || ny < 0 || ny >= height) continue;
+                        const BiomeType neighbor = current[static_cast<size_t>(ny * width + nx)];
+                        if (isWaterBiome(neighbor) == isWaterBiome(biome)) {
+                            ++scores[static_cast<size_t>(neighbor)];
+                        }
+                    }
+                }
+
+                BiomeType best = biome;
+                for (int candidate = 0; candidate < 9; ++candidate) {
+                    const BiomeType candidateBiome = static_cast<BiomeType>(candidate);
+                    if (isWaterBiome(candidateBiome) != isWaterBiome(biome)) continue;
+                    if (scores[static_cast<size_t>(candidateBiome)] > scores[static_cast<size_t>(best)]) {
+                        best = candidateBiome;
+                    }
+                }
+                next[index] = best;
+            }
+        }
+        current.swap(next);
+    }
+
+    for (int pass = 0; pass < 3; ++pass) {
+        std::vector<bool> visited(current.size(), false);
+        std::vector<std::pair<size_t, BiomeType>> repairs;
+
+        for (int y = 0; y < height; ++y) {
+            for (int x = 0; x < width; ++x) {
+                const size_t start = static_cast<size_t>(y * width + x);
+                if (visited[start]) continue;
+
+                const BiomeType biome = current[start];
+                std::vector<size_t> region{start};
+                visited[start] = true;
+                for (size_t cursor = 0; cursor < region.size(); ++cursor) {
+                    const size_t index = region[cursor];
+                    const int cellX = static_cast<int>(index % static_cast<size_t>(width));
+                    const int cellY = static_cast<int>(index / static_cast<size_t>(width));
+                    for (int oy = -1; oy <= 1; ++oy) {
+                        for (int ox = -1; ox <= 1; ++ox) {
+                            const int nx = cellX + ox;
+                            const int ny = cellY + oy;
+                            if ((ox == 0 && oy == 0) || nx < 0 || nx >= width ||
+                                ny < 0 || ny >= height) continue;
+                            const size_t neighborIndex =
+                                static_cast<size_t>(ny * width + nx);
+                            if (!visited[neighborIndex] && current[neighborIndex] == biome) {
+                                visited[neighborIndex] = true;
+                                region.push_back(neighborIndex);
+                            }
+                        }
+                    }
+                }
+
+                if (region.size() >= 3) continue;
+                int votes[9]{};
+                for (size_t index : region) {
+                    const int cellX = static_cast<int>(index % static_cast<size_t>(width));
+                    const int cellY = static_cast<int>(index / static_cast<size_t>(width));
+                    for (int oy = -1; oy <= 1; ++oy) {
+                        for (int ox = -1; ox <= 1; ++ox) {
+                            const int nx = cellX + ox;
+                            const int ny = cellY + oy;
+                            if ((ox == 0 && oy == 0) || nx < 0 || nx >= width ||
+                                ny < 0 || ny >= height) continue;
+                            const BiomeType neighbor =
+                                current[static_cast<size_t>(ny * width + nx)];
+                            if (neighbor != biome &&
+                                isWaterBiome(neighbor) == isWaterBiome(biome)) {
+                                ++votes[static_cast<size_t>(neighbor)];
+                            }
+                        }
+                    }
+                }
+
+                BiomeType replacement = biome;
+                for (int candidate = 0; candidate < 9; ++candidate) {
+                    const BiomeType candidateBiome = static_cast<BiomeType>(candidate);
+                    if (isWaterBiome(candidateBiome) != isWaterBiome(biome)) continue;
+                    if (votes[static_cast<size_t>(candidateBiome)] >
+                        votes[static_cast<size_t>(replacement)]) {
+                        replacement = candidateBiome;
+                    }
+                }
+                if (replacement != biome) {
+                    for (size_t index : region) repairs.emplace_back(index, replacement);
+                }
+            }
+        }
+
+        if (repairs.empty()) break;
+        for (const auto& repair : repairs) current[repair.first] = repair.second;
+    }
+    return current;
+}
+
+} // namespace
 
 WorldMap::WorldMap(int width, int height)
     : m_width(width), m_height(height) {
@@ -88,65 +224,29 @@ void WorldMap::generateProceduralWorld(uint32_t seed) {
 }
 
 void WorldMap::assignBiomesAndElevations(uint32_t seed) {
-    std::mt19937 rng(seed);
-    std::uniform_real_distribution<float> fDist(0.0f, 6.28318f);
+    std::vector<BiomeType> initialBiomes(static_cast<size_t>(m_width * m_height));
+    for (int y = 0; y < m_height; ++y) {
+        for (int x = 0; x < m_width; ++x) {
+            Cell& cell = getCell(x, y);
+            cell.climate = MultiNoiseBiomeGenerator::sample(x, y, m_width, m_height, seed);
+            initialBiomes[static_cast<size_t>(y * m_width + x)] =
+                mapBiomeID(cell.climate.primary_biome);
+        }
+    }
 
-    float p1 = fDist(rng);
-    float p2 = fDist(rng);
-    float p3 = fDist(rng);
+    // Resolve every cell's biome first, then validate the map-wide regions before rendering.
+    const std::vector<BiomeType> smoothedBiomes =
+        smoothBiomeRegions(initialBiomes, m_width, m_height);
 
     for (int y = 0; y < m_height; ++y) {
         for (int x = 0; x < m_width; ++x) {
-            Cell& c = getCell(x, y);
-
-            // Normalized coordinates [-1, 1]
-            float nx = (static_cast<float>(x) / static_cast<float>(m_width)) * 2.0f - 1.0f;
-            float ny = (static_cast<float>(y) / static_cast<float>(m_height)) * 2.0f - 1.0f;
-
-            // Island / Continental mask: distance from center
-            float distFromCenter = std::sqrt(nx * nx + ny * ny);
-
-            // Multi-frequency noise synthesis
-            float e1 = std::sin(nx * 3.5f + p1) * std::cos(ny * 3.5f + p2);
-            float e2 = std::sin(nx * 7.0f + p2) * std::cos(ny * 7.0f + p3) * 0.5f;
-            float e3 = std::sin(nx * 14.0f + p3) * std::cos(ny * 14.0f + p1) * 0.25f;
-            float rawElev = (e1 + e2 + e3) * 0.65f + 0.45f - (distFromCenter * 0.75f);
-
-            // Moisture synthesis (latitude + rainshadow)
-            float latitude = std::abs(ny);
-            float m1 = std::cos(nx * 4.0f + p3) * std::sin(ny * 4.0f + p1) * 0.5f + 0.5f;
-            float moisture = m1 * (1.0f - latitude * 0.35f);
-
-            // Classify Elevation & Biome with cohesive, harmonious terraces
-            if (rawElev < 0.12f) {
-                c.elevation = 0.0f;
-                c.biome = BiomeType::DeepOcean;
-            } else if (rawElev < 0.28f) {
-                c.elevation = 0.0f;
-                c.biome = BiomeType::ShallowWater;
-            } else if (rawElev > 1.02f) {
-                c.elevation = 0.95f;
-                c.biome = BiomeType::RuggedMountains;
-            } else if (rawElev > 0.78f) {
-                c.elevation = 0.95f;
-                c.biome = BiomeType::HighlandHills;
-            } else {
-                // Cohesive lowland meadow / forest / coastal plain terrace
-                c.elevation = 0.50f;
-                if (rawElev < 0.38f) {
-                    c.biome = BiomeType::CoastalPlains;
-                } else if (latitude > 0.78f) {
-                    c.biome = BiomeType::FrozenTundra;
-                } else if (moisture < 0.25f && latitude < 0.45f) {
-                    c.biome = BiomeType::AridDesert;
-                } else if (moisture > 0.62f) {
-                    c.biome = BiomeType::DenseForest;
-                } else if (moisture > 0.40f) {
-                    c.biome = BiomeType::FertileValley;
-                } else {
-                    c.biome = BiomeType::CoastalPlains;
-                }
-            }
+            Cell& cell = getCell(x, y);
+            cell.biome = smoothedBiomes[static_cast<size_t>(y * m_width + x)];
+            cell.elevation = isWaterBiome(cell.biome)
+                ? 0.0f
+                : ((cell.biome == BiomeType::HighlandHills || cell.biome == BiomeType::RuggedMountains)
+                    ? 0.95f
+                    : 0.50f);
         }
     }
 }

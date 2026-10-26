@@ -12,6 +12,7 @@
 #include "TileSet.hpp"
 #include "Humano.hpp"
 #include "FogOfWar.hpp"
+#include <array>
 #include <vector>
 #include <string>
 
@@ -131,14 +132,18 @@ private:
     std::vector<UIButton> m_optionsButtons;
     std::vector<UIButton> m_creationButtons;
 
-    // Fondo del Menú Principal, Cursor RTS (32x32), Templo (128x128) y Atlas de Terreno (512x128)
+    // Fondos cósmico (256x128) y de menú, Cursor RTS, Templo y atlas de terreno
     int m_bgWidth{0};
     int m_bgHeight{0};
     std::vector<uint32_t> m_menuBgPixels;
+    std::vector<uint32_t> m_spaceBackgroundPixels;
     std::vector<uint32_t> m_cursorPixels;
     std::vector<uint32_t> m_templePixels;
     std::vector<uint32_t> m_terrainAtlasPixels;
+    std::array<std::vector<uint32_t>, 7> m_terrainPropPixels;
     void loadMenuBackground();
+    void loadSpaceBackground();
+    void drawSpaceBackground();
     void loadCursor();
     void loadTempleAndTerrainAssets();
 

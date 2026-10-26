@@ -20,6 +20,7 @@ TEST_DIR = tests
 SRCS = $(SRC_DIR)/IsometricCamera.cpp \
        $(SRC_DIR)/Religion.cpp \
        $(SRC_DIR)/Cell.cpp \
+       $(SRC_DIR)/MultiNoiseBiome.cpp \
        $(SRC_DIR)/WorldMap.cpp \
        $(SRC_DIR)/AdvancementSystem.cpp \
        $(SRC_DIR)/ReplicationEngine.cpp \

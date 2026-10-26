@@ -11,9 +11,9 @@ TileSet::TileSet() {
     m_pixels.resize(m_width * m_height, 0);
 
     // Intentar cargar la nueva hoja de sprites del aldeano masculino (256x256, 4x4)
-    if (!cargarDesdeArchivo("assets/sprites/humano_male_sheet.rgba")) {
-        if (!cargarDesdeArchivo("../assets/sprites/humano_male_sheet.rgba")) {
-            if (!cargarDesdeArchivo("/home/Ivancho/Documentos/religion_simulator_isometric/assets/sprites/humano_male_sheet.rgba")) {
+    if (!cargarDesdeArchivo("assets/sprites/units/humano_male/humano_male_sheet.rgba")) {
+        if (!cargarDesdeArchivo("../assets/sprites/units/humano_male/humano_male_sheet.rgba")) {
+            if (!cargarDesdeArchivo("/home/Ivancho/Documentos/religion_simulator_isometric/assets/sprites/units/humano_male/humano_male_sheet.rgba")) {
                 cargarDesdeArchivo("assets/tileset_humano.rgba");
             }
         }

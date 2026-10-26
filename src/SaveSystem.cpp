@@ -36,7 +36,11 @@ std::string SaveSystem::formatTimestamp(int64_t epochMs) {
     if (epochMs <= 0) return "Desconocida";
     std::time_t t = static_cast<std::time_t>(epochMs / 1000);
     std::tm tm{};
+#ifdef _WIN32
+    localtime_s(&tm, &t);
+#else
     localtime_r(&t, &tm);
+#endif
     std::ostringstream ss;
     ss << std::put_time(&tm, "%d/%m/%Y %H:%M");
     return ss.str();
@@ -161,7 +165,7 @@ bool SaveSystem::saveWorld(Game& game, const std::string& worldFolderName) {
         if (!binFile.is_open()) return false;
 
         uint32_t magic = 0x53414954; // 'FAIS'
-        uint32_t version = 1;
+        uint32_t version = 2;
         binFile.write(reinterpret_cast<const char*>(&magic), 4);
         binFile.write(reinterpret_cast<const char*>(&version), 4);
 
@@ -176,6 +180,14 @@ bool SaveSystem::saveWorld(Game& game, const std::string& worldFolderName) {
                 binFile.write(reinterpret_cast<const char*>(&c.elevation), sizeof(float));
                 uint8_t biomeByte = static_cast<uint8_t>(c.biome);
                 binFile.write(reinterpret_cast<const char*>(&biomeByte), 1);
+                uint8_t primaryClimateBiome = static_cast<uint8_t>(c.climate.primary_biome);
+                uint8_t secondaryClimateBiome = static_cast<uint8_t>(c.climate.secondary_biome);
+                binFile.write(reinterpret_cast<const char*>(&primaryClimateBiome), 1);
+                binFile.write(reinterpret_cast<const char*>(&secondaryClimateBiome), 1);
+                binFile.write(reinterpret_cast<const char*>(&c.climate.blend_factor), sizeof(float));
+                binFile.write(reinterpret_cast<const char*>(&c.climate.elevation), sizeof(float));
+                binFile.write(reinterpret_cast<const char*>(&c.climate.temperature), sizeof(float));
+                binFile.write(reinterpret_cast<const char*>(&c.climate.moisture), sizeof(float));
                 binFile.write(reinterpret_cast<const char*>(&c.population), sizeof(int));
                 binFile.write(reinterpret_cast<const char*>(&c.maxPopulation), sizeof(int));
                 binFile.write(reinterpret_cast<const char*>(&c.development), sizeof(float));
@@ -267,7 +279,7 @@ bool SaveSystem::loadWorld(Game& game, const std::string& worldFolderName) {
     uint32_t magic = 0, version = 0;
     binFile.read(reinterpret_cast<char*>(&magic), 4);
     binFile.read(reinterpret_cast<char*>(&version), 4);
-    if (magic != 0x53414954) {
+    if (magic != 0x53414954 || (version != 1 && version != 2)) {
         std::cerr << "[SaveSystem] Formato de archivo world.bin no válido." << std::endl;
         return false;
     }
@@ -277,6 +289,9 @@ bool SaveSystem::loadWorld(Game& game, const std::string& worldFolderName) {
     binFile.read(reinterpret_cast<char*>(&readH), sizeof(int));
 
     WorldMap newMap(readW, readH);
+    if (version == 1) {
+        newMap.generateProceduralWorld(seed);
+    }
     for (int y = 0; y < readH; ++y) {
         for (int x = 0; x < readW; ++x) {
             Cell& c = newMap.getCell(x, y);
@@ -286,6 +301,18 @@ bool SaveSystem::loadWorld(Game& game, const std::string& worldFolderName) {
             uint8_t biomeByte = 0;
             binFile.read(reinterpret_cast<char*>(&biomeByte), 1);
             c.biome = static_cast<BiomeType>(biomeByte);
+            if (version >= 2) {
+                uint8_t primaryClimateBiome = 0;
+                uint8_t secondaryClimateBiome = 0;
+                binFile.read(reinterpret_cast<char*>(&primaryClimateBiome), 1);
+                binFile.read(reinterpret_cast<char*>(&secondaryClimateBiome), 1);
+                c.climate.primary_biome = static_cast<BiomeID>(primaryClimateBiome);
+                c.climate.secondary_biome = static_cast<BiomeID>(secondaryClimateBiome);
+                binFile.read(reinterpret_cast<char*>(&c.climate.blend_factor), sizeof(float));
+                binFile.read(reinterpret_cast<char*>(&c.climate.elevation), sizeof(float));
+                binFile.read(reinterpret_cast<char*>(&c.climate.temperature), sizeof(float));
+                binFile.read(reinterpret_cast<char*>(&c.climate.moisture), sizeof(float));
+            }
             binFile.read(reinterpret_cast<char*>(&c.population), sizeof(int));
             binFile.read(reinterpret_cast<char*>(&c.maxPopulation), sizeof(int));
             binFile.read(reinterpret_cast<char*>(&c.development), sizeof(float));

@@ -736,8 +736,34 @@ void GestorHumanos::actualizar(float dt, WorldMap& mapa) {
             context.neighborTribePowerRatio = (ownClanCount > 0)
                 ? std::clamp(static_cast<float>(rivalTribeCount) / static_cast<float>(ownClanCount), 0.1f, 2.0f)
                 : 1.0f;
-            context.environmentalCarryingCapacity =
-                (curCell.biome == BiomeType::FertileValley || curCell.biome == BiomeType::DenseForest) ? 90.0f : 65.0f;
+            context.currentBiome = curCell.biome;
+            switch (curCell.biome) {
+                case BiomeType::FertileValley:
+                    context.environmentalCarryingCapacity = 100.0f;
+                    break;
+                case BiomeType::CoastalPlains:
+                    context.environmentalCarryingCapacity = 85.0f;
+                    break;
+                case BiomeType::DenseForest:
+                    context.environmentalCarryingCapacity = 75.0f;
+                    break;
+                case BiomeType::HighlandHills:
+                    context.environmentalCarryingCapacity = 60.0f;
+                    break;
+                case BiomeType::AridDesert:
+                    context.environmentalCarryingCapacity = 30.0f;
+                    break;
+                case BiomeType::RuggedMountains:
+                    context.environmentalCarryingCapacity = 20.0f;
+                    break;
+                case BiomeType::FrozenTundra:
+                    context.environmentalCarryingCapacity = 40.0f;
+                    break;
+                case BiomeType::DeepOcean:
+                case BiomeType::ShallowWater:
+                    context.environmentalCarryingCapacity = 0.0f;
+                    break;
+            }
             context.hasShrine = shrineNearby;
 
             RealisticPopGroup& pop = hObj.getPopGroupMutable();

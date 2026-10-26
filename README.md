@@ -65,11 +65,15 @@ Las partidas se guardan en `saves/` (no van al repositorio).
 
 ## Mapa, biomas y vista isométrica
 
-El continente se genera con ruido armónico de varias octavas. Biomas:
+El continente se genera con un selector Multi-Noise determinista. Cada celda muestrea elevación, humedad y temperatura base continuas en `[-1, 1]`; la temperatura final aplica enfriamiento orográfico según la altura. Se seleccionan los dos objetivos ponderados más cercanos y se guarda un factor de mezcla para transiciones. La tabla de diez objetivos incluye océano, costa, desierto, sabana, llanuras, bosque templado, taiga, selva tropical, montaña nevada y pico rocoso. Para mantener compatibilidad con las mecánicas y sprites existentes, algunos objetivos climáticos comparten la categoría de juego (por ejemplo, taiga y tundra, o bosques templados y tropicales).
+
+Biomas de juego:
 
 Océano profundo, aguas costeras, llanuras, valles fértiles, bosques, colinas, desierto, montañas, tundra.
 
-Cada celda tiene capacidad de carga, demografía logística y conectividad comercial. La cámara usa proyección diamante `(x, y, h) → pantalla`, faldas de elevación y picking inverso por clic.
+Cada celda conserva sus ejes climáticos, bioma primario/secundario y mezcla, además de capacidad de carga, demografía logística y conectividad comercial. Los guardados v2 incluyen estos datos y el cargador sigue aceptando partidas v1. La cámara usa proyección diamante `(x, y, h) → pantalla`, faldas de elevación y picking inverso por clic. El fondo alrededor del mapa usa el sprite espacial en mosaico de 256×128 (`assets/sprites/miscellany/space_background.png`). El atlas nuevo de terreno mide 1024×64 y contiene únicamente 16 tiles de suelo de 64×64; los árboles, arbustos y rocas se cargan como sprites independientes desde sus carpetas, sin compartir el atlas.
+
+**Convención de sprites:** `assets/sprites/terrain/` para texturas de terreno y atlas; `units/<nombre_de_unidad>/` para cada unidad y sus animaciones; `trees/` para árboles y arbustos; `mountains/` para montañas y rocas; `buildings/` para edificios y templos; `miscellany/` para fondos y recursos variados. Los sprites nuevos deben colocarse en la categoría correspondiente, y cada unidad debe tener su propia subcarpeta dentro de `units/`.
 
 **Modos de mapa:** `1` fes, `2` terreno, `3` calor de sincretismo, `4` eras. Hay niebla de guerra ligada a la fe.
 

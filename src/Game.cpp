@@ -7,18 +7,18 @@
 #include <cctype>
 #include <ctime>
 
-#if __has_include(<X11/Xlib.h>) && __has_include(<X11/keysym.h>)
-#define HAS_X11 1
-#include <X11/Xlib.h>
-#include <X11/Xutil.h>
-#include <X11/keysym.h>
-#elif defined(_WIN32)
+#if defined(_WIN32)
 #define HAS_WIN32 1
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
 #include <windowsx.h>
+#elif __has_include(<X11/Xlib.h>) && __has_include(<X11/keysym.h>)
+#define HAS_X11 1
+#include <X11/Xlib.h>
+#include <X11/Xutil.h>
+#include <X11/keysym.h>
 #endif
 
 #ifdef HAS_WIN32

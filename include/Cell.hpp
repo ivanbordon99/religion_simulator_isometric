@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Types.hpp"
+#include "MultiNoiseBiome.hpp"
 #include <vector>
 #include <string>
 #include <utility>
@@ -12,6 +13,7 @@ struct Cell {
     int y{0};
     float elevation{1.0f}; // 0 = water/ocean, 1 = plains, 2 = hills, 3+ = mountains
     BiomeType biome{BiomeType::CoastalPlains};
+    TileBiomeData climate;
 
     int population{1000};
     int maxPopulation{5000};

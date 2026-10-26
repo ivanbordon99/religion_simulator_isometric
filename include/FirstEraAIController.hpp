@@ -1,4 +1,5 @@
 #pragma once
+#include "Types.hpp"
 #if __has_include(<raylib.h>)
 #include <raylib.h>
 #else
@@ -8,6 +9,7 @@ struct Vector2 {
 };
 #endif
 #include <algorithm>
+#include <cmath>
 
 // Estados autónomos realistas para los aldeanos (Pops) de la primera era
 enum class RealisticVillagerState {
@@ -35,17 +37,30 @@ struct RealisticCellContext {
     float neighborTribePowerRatio{1.0f};       // Poder relativo del grupo vecino (0.1 a 2.0)
     float environmentalCarryingCapacity{80.0f}; // Límite de recursos ecológicos de la celda
     bool hasShrine{false};
+    ReligionSim::BiomeType currentBiome{ReligionSim::BiomeType::CoastalPlains};
 };
 
 class FirstEraAIController {
 public:
     // Método principal de actualización autónoma (Ejecutado por cada grupo en el loop del juego)
     void UpdateRealisticBehavior(RealisticPopGroup& pop, const RealisticCellContext& context, float deltaTime) {
-        
-        // 1. Restricción Ecológica y Antropológica Absoluta: El hambre anula el dogma
-        if (pop.foodSupply < 35.0f) {
+        if (!std::isfinite(deltaTime) || deltaTime <= 0.0f) {
+            return;
+        }
+
+        pop.populationCount = std::max(0, pop.populationCount);
+        pop.foodSupply = std::clamp(pop.foodSupply, 0.0f, 100.0f);
+        pop.divineWill = std::clamp(pop.divineWill, 0.0f, 100.0f);
+        pop.unityWill = std::clamp(pop.unityWill, 0.0f, 100.0f);
+
+        const float biomePenalty =
+            context.currentBiome == ReligionSim::BiomeType::AridDesert ? 1.8f : 1.0f;
+        const float foodThreshold = 35.0f * biomePenalty;
+
+        // 1. Restricción Ecológica y Antropológica Absoluta: el hambre anula el dogma.
+        if (pop.foodSupply < foodThreshold) {
             pop.state = RealisticVillagerState::SURVIVAL_FORAGING;
-            ExecuteSurvivalLogic(pop, deltaTime);
+            ExecuteSurvivalLogic(pop, context, deltaTime, biomePenalty);
             return;
         }
 
@@ -75,10 +90,13 @@ public:
     }
 
 private:
-    void ExecuteSurvivalLogic(RealisticPopGroup& pop, float deltaTime) {
+    void ExecuteSurvivalLogic(RealisticPopGroup& pop, const RealisticCellContext& context,
+                              float deltaTime, float biomePenalty) {
         // La población prioriza la búsqueda física; el fervor decae rápidamente ante la escasez
-        pop.foodSupply += 4.0f * deltaTime; 
-        pop.divineWill = std::max(0.0f, pop.divineWill - 0.8f * deltaTime); 
+        const float resourceFactor = std::clamp(context.environmentalCarryingCapacity, 0.0f, 100.0f) / 80.0f;
+        const float foodRecovery = (4.0f * resourceFactor / biomePenalty) * deltaTime;
+        pop.foodSupply = std::min(100.0f, pop.foodSupply + foodRecovery);
+        pop.divineWill = std::max(0.0f, pop.divineWill - 0.8f * deltaTime);
     }
 
     void HandleRealisticBorderEncounter(RealisticPopGroup& pop, float powerRatio, float deltaTime) {
