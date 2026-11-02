@@ -57,6 +57,33 @@ int ReligionRegistry::createPrimordialReligion(const std::string& name, const st
     r.advancementLevel = 1;
     r.addDoctrine(DoctrineType::AnimistSpirits);
 
+    std::string lowerName = name;
+    for (char& c : lowerName) c = static_cast<char>(std::tolower(c));
+    std::string lowerSym = symbol;
+    for (char& c : lowerSym) c = static_cast<char>(std::tolower(c));
+
+    if (lowerSym.find("sun") != std::string::npos || lowerName.find("sol") != std::string::npos ||
+        lowerName.find("cielo") != std::string::npos || lowerName.find("fuego") != std::string::npos) {
+        r.archetype = TheologicalArchetype::SolarCelestial;
+        r.zeal = 0.65f;
+    } else if (lowerSym.find("earth") != std::string::npos || lowerName.find("tierra") != std::string::npos ||
+               lowerName.find("gaia") != std::string::npos || lowerName.find("sombra") != std::string::npos ||
+               lowerName.find("ancestro") != std::string::npos) {
+        r.archetype = TheologicalArchetype::ChthonicAncestral;
+        r.cohesion = 0.80f;
+    } else if (lowerName.find("monad") != std::string::npos || lowerName.find("orden") != std::string::npos ||
+               lowerName.find("eterno") != std::string::npos) {
+        r.archetype = TheologicalArchetype::DogmaticExclusivist;
+        r.cohesion = 0.85f;
+        r.syncretismTolerance = 0.20f;
+    } else if (lowerName.find("star") != std::string::npos || lowerName.find("dharma") != std::string::npos ||
+               lowerName.find("panteon") != std::string::npos) {
+        r.archetype = TheologicalArchetype::PolytheisticPantheon;
+        r.syncretismTolerance = 0.70f;
+    } else {
+        r.archetype = TheologicalArchetype::TotemicAnimism;
+    }
+
     m_religions.push_back(r);
     return r.id;
 }
@@ -100,6 +127,7 @@ int ReligionRegistry::createSyncreticReligion(int parentAId, int parentBId, int 
     for (auto d : a->doctrines) r.addDoctrine(d);
     for (auto d : b->doctrines) r.addDoctrine(d);
     r.addDoctrine(DoctrineType::SyncreticOpenness);
+    r.archetype = TheologicalArchetype::PolytheisticPantheon;
 
     m_religions.push_back(r);
     return r.id;
@@ -140,6 +168,7 @@ int ReligionRegistry::createSchismReligion(int parentId, int year, const Point2i
     r.scholasticism = p->scholasticism;
     r.advancementLevel = p->advancementLevel;
     r.currentEra = p->currentEra;
+    r.archetype = TheologicalArchetype::DogmaticExclusivist;
 
     for (auto d : p->doctrines) r.addDoctrine(d);
     r.addDoctrine(DoctrineType::ProselytizingZeal);

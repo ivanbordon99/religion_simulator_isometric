@@ -14,7 +14,9 @@ public:
     void addEvent(const GameEvent& ev);
     void addEvent(int year, EventCategory cat, const std::string& title,
                   const std::string& desc, const Point2i& loc,
-                  int relA = 0, int relB = 0, ColorRGB color = {255, 200, 50});
+                  int relA = 0, int relB = 0, ColorRGB color = {255, 200, 50},
+                  bool isTurningPoint = false, const std::string& actor = "",
+                  const std::string& consequence = "");
 
     const std::vector<GameEvent>& getAllEvents() const { return m_events; }
     const GameEvent* getEventById(int id) const;
@@ -26,6 +28,8 @@ public:
     // Event line feed (latest recent events)
     std::vector<GameEvent> getRecentEvents(size_t count = 6) const;
     std::vector<GameEvent> getEventsForYearRange(int startYear, int endYear) const;
+    std::vector<GameEvent> getTurningPoints() const;
+    std::vector<GameEvent> getFilteredEvents(int filterIndex) const;
 
     size_t size() const { return m_events.size(); }
 

@@ -41,6 +41,265 @@ AdvancementSystem::AdvancementSystem() {
         {DoctrineType::CosmicTranscendence, "Post-Biological Singularity", "Quantum computing consciousness, mind uploads, and cyber-faith.",
          HistoricalEra::TranshumanistPostBiological, 3200, 2.6f, 1.5f, 1.5f}
     };
+
+    // Árbol Teológico de Avances de la Fe: 16 avances distribuidos en 4 Eras
+    m_advancementTree = {
+        // =========================================================================
+        // ERA 0: ANIMISMO PRIMORDIAL (-4000 a -3000 BCE)
+        // =========================================================================
+        {
+            101,
+            "Mito del Fuego Sagrado",
+            "Mito del Fuego",
+            "Relato ancestral del primer pacto divino alrededor de las brasas.",
+            "+15% Velocidad de replicacion (Zeal) y +10% difusion espacial.",
+            HistoricalEra::PrimordialAnimism,
+            FaithBranch::ReplicationSpread,
+            0, // Tier 0 (Raíz)
+            60, // Fe
+            {}, // Sin prerrequisitos
+            false, HistoricalEra::PrimordialAnimism,
+            4, // Icono: Fuego Sagrado
+            0.15f, 0.10f, 0.0f, 0.0f, 0.0f, 1
+        },
+        {
+            103,
+            "Rito de Fertilidad de la Tierra",
+            "Rito Fertilidad",
+            "Danza de las estaciones y ofrendas para bendecir los suelos y cosechas.",
+            "+20% Limite poblacional y mayor natalidad de aldeanos creyentes.",
+            HistoricalEra::PrimordialAnimism,
+            FaithBranch::HarvestDemographics,
+            0, // Tier 0 (Raíz)
+            70, // Fe
+            {}, // Sin prerrequisitos
+            false, HistoricalEra::PrimordialAnimism,
+            1, // Icono: Espiga de trigo
+            0.05f, 0.0f, 0.0f, 0.20f, 0.0f, 1
+        },
+        {
+            105,
+            "Culto a los Ancestros y Reliquias",
+            "Culto Ancestros",
+            "Preservacion de huesos y talismanes de los primeros sabios tribales.",
+            "+25% Cohesion dogmatica. Reduce la perdida de fe ante la muerte de aldeanos.",
+            HistoricalEra::PrimordialAnimism,
+            FaithBranch::DogmaCohesion,
+            0, // Tier 0 (Raíz)
+            80, // Fe
+            {}, // Sin prerrequisitos
+            false, HistoricalEra::PrimordialAnimism,
+            5, // Icono: Escudo relicario
+            0.0f, 0.0f, 0.25f, 0.0f, 0.0f, 1
+        },
+        {
+            100,
+            "Santuario Megalitico y Comunion",
+            "Hito: Megalitos",
+            "Ereccion de menhires megaliticos y consagracion del primer circulo sagrado.",
+            "¡ASCENSION HISTORICA! Avanza la civilizacion a la Era 1: Chamanismo Estructural.",
+            HistoricalEra::PrimordialAnimism,
+            FaithBranch::EraCapstone,
+            1, // Tier 1 (Hito de Era)
+            180, // Fe
+            {101, 103}, // Requiere al menos Mito del Fuego o Rito de Fertilidad
+            true, HistoricalEra::StructuralShamanism,
+            6, // Icono: Corona / Hito
+            0.10f, 0.15f, 0.15f, 0.10f, 0.30f, 3
+        },
+
+        // =========================================================================
+        // ERA 1: CHAMANISMO ESTRUCTURAL (-3000 a -1000 BCE)
+        // =========================================================================
+        {
+            201,
+            "Caravanas Nomadas de la Fe",
+            "Caravanas de Fe",
+            "Expediciones de fieles que llevan iconos sagrados a traves de estepas y bosques.",
+            "Desbloquea Caravanas Misioneras con +35% de velocidad y mayor rango.",
+            HistoricalEra::StructuralShamanism,
+            FaithBranch::ReplicationSpread,
+            1,
+            250,
+            {100, 101},
+            false, HistoricalEra::StructuralShamanism,
+            0, // Icono: Paloma misionera
+            0.15f, 0.25f, 0.0f, 0.0f, 0.25f, 3
+        },
+        {
+            203,
+            "Graneros Consagrados y Festines",
+            "Graneros Sagrados",
+            "Almacenamiento comunitario bendecido que garantiza alimento en epocas duras.",
+            "+25% Desarrollo en celdas dominantes; aldeanos trabajan con mayor vigor.",
+            HistoricalEra::StructuralShamanism,
+            FaithBranch::HarvestDemographics,
+            1,
+            260,
+            {100, 103},
+            false, HistoricalEra::StructuralShamanism,
+            1, // Icono: Espiga
+            0.0f, 0.0f, 0.10f, 0.25f, 0.15f, 3
+        },
+        {
+            205,
+            "Circulo Chamanico y Tabues",
+            "Circulo Chamanico",
+            "Castas de sabios que fijan prohibiciones rituales y protegen la fe comunal.",
+            "-50% Probabilidad de cismas hereticos; chamanes obtienen +30 HP en combate espiritual.",
+            HistoricalEra::StructuralShamanism,
+            FaithBranch::DogmaCohesion,
+            1,
+            280,
+            {100, 105},
+            false, HistoricalEra::StructuralShamanism,
+            5, // Icono: Escudo
+            0.0f, 0.05f, 0.30f, 0.0f, 0.10f, 3
+        },
+        {
+            200,
+            "Cuspide del Zigurat y Panteon",
+            "Hito: Zigurat",
+            "Monumento escalonado que une el cielo y la tierra bajo una jerarquia sagrada.",
+            "¡ASCENSION HISTORICA! Avanza la civilizacion a la Era 2: Politeismo Territorial.",
+            HistoricalEra::StructuralShamanism,
+            FaithBranch::EraCapstone,
+            2,
+            480,
+            {201, 203},
+            true, HistoricalEra::TerritorialPolytheism,
+            6, // Icono: Corona
+            0.15f, 0.20f, 0.20f, 0.20f, 0.50f, 6
+        },
+
+        // =========================================================================
+        // ERA 2: POLITEISMO TERRITORIAL (-1000 BCE a 200 CE)
+        // =========================================================================
+        {
+            301,
+            "Rutas Continentales de Peregrinaje",
+            "Peregrinaje Continental",
+            "Caminos empedrados custodiados por fieles para atraer creyentes extranjeros.",
+            "+50% Frecuencia de Caravanas Misioneras y eliminacion del desgaste por distancia.",
+            HistoricalEra::TerritorialPolytheism,
+            FaithBranch::ReplicationSpread,
+            2,
+            650,
+            {200, 201},
+            false, HistoricalEra::TerritorialPolytheism,
+            0, // Icono: Paloma
+            0.25f, 0.35f, 0.10f, 0.0f, 0.30f, 5
+        },
+        {
+            302,
+            "Acueductos Benditos y Ciudades-Templo",
+            "Ciudades-Templo",
+            "Grandes urbes construidas alrededor del Templo Mayor con canales sagrados.",
+            "+40% Capacidad maxima poblacional y generacion de +5 Fe anual pasiva.",
+            HistoricalEra::TerritorialPolytheism,
+            FaithBranch::HarvestDemographics,
+            2,
+            700,
+            {200, 203},
+            false, HistoricalEra::TerritorialPolytheism,
+            3, // Icono: Templo
+            0.05f, 0.15f, 0.10f, 0.40f, 0.50f, 6
+        },
+        {
+            303,
+            "Codice Escrito y Ley Canonica",
+            "Codice Canonico",
+            "Leyes sagradas grabadas en papiro y tablas que rigen a toda la nacion teocratica.",
+            "Inmunidad casi total a cismas (+40% Cohesion); los dogmas se transmiten intactos.",
+            HistoricalEra::TerritorialPolytheism,
+            FaithBranch::DogmaCohesion,
+            2,
+            750,
+            {200, 205},
+            false, HistoricalEra::TerritorialPolytheism,
+            2, // Icono: Codice
+            0.10f, 0.10f, 0.40f, 0.0f, 0.20f, 6
+        },
+        {
+            300,
+            "Revelacion del Dogma Universal",
+            "Hito: Dogma Universal",
+            "Unificacion teologica definitiva proclamada para redimir a la humanidad entera.",
+            "¡ASCENSION HISTORICA! Avanza la civilizacion a la Era 3: Religiones Universales.",
+            HistoricalEra::TerritorialPolytheism,
+            FaithBranch::EraCapstone,
+            3,
+            1100,
+            {301, 303},
+            true, HistoricalEra::UniversalReligions,
+            7, // Icono: Trascendencia / Ojo
+            0.30f, 0.40f, 0.35f, 0.25f, 0.70f, 10
+        },
+
+        // =========================================================================
+        // ERA 3: RELIGIONES UNIVERSALES (200 a 1500 CE)
+        // =========================================================================
+        {
+            401,
+            "Evangelizacion Ecumenica Global",
+            "Evangelizacion Global",
+            "Misioneros infatigables cruzan oceanos y montanas llevando la palabra sagrada.",
+            "+80% Replicacion global de la fe y asimilacion pacifica de cultos menores.",
+            HistoricalEra::UniversalReligions,
+            FaithBranch::ReplicationSpread,
+            3,
+            1400,
+            {300, 301},
+            false, HistoricalEra::UniversalReligions,
+            0, // Icono: Paloma
+            0.40f, 0.50f, 0.15f, 0.0f, 0.40f, 12
+        },
+        {
+            402,
+            "Caridad Institucional y Sanacion",
+            "Caridad y Sanacion",
+            "Hospicios y monasterios donde la devocion sana a los enfermos y nutre al necesitado.",
+            "Aldeanos creyentes recuperan salud constantemente; reduce la mortalidad al minimo.",
+            HistoricalEra::UniversalReligions,
+            FaithBranch::HarvestDemographics,
+            3,
+            1500,
+            {300, 302},
+            false, HistoricalEra::UniversalReligions,
+            1, // Icono: Espiga
+            0.10f, 0.20f, 0.20f, 0.40f, 0.50f, 12
+        },
+        {
+            403,
+            "Teologia Escolastica y Dogma Eterno",
+            "Teologia Escolastica",
+            "Sintesis suprema de razon y fe que disipa cualquier duda o herejia.",
+            "Inmunidad absoluta contra cismas doctrinales y +20 Fe anual pasiva.",
+            HistoricalEra::UniversalReligions,
+            FaithBranch::DogmaCohesion,
+            3,
+            1600,
+            {300, 303},
+            false, HistoricalEra::UniversalReligions,
+            2, // Icono: Codice
+            0.15f, 0.20f, 0.50f, 0.0f, 0.30f, 15
+        },
+        {
+            400,
+            "Trascendencia Mistica y Apogeo Sagrado",
+            "Hito: Trascendencia",
+            "Comunion total entre la divinidad y la humanidad, alcanzando la inmortalidad del alma.",
+            "¡APOGEO TEOLOGICO! Consagra la hegemonia espiritual eterna de tu pueblo.",
+            HistoricalEra::UniversalReligions,
+            FaithBranch::EraCapstone,
+            4,
+            2500,
+            {401, 402, 403},
+            true, HistoricalEra::RationalizationSecularization,
+            7, // Icono: Estrella cosmica
+            0.50f, 0.60f, 0.50f, 0.50f, 1.00f, 25
+        }
+    };
 }
 
 const EraConfig& AdvancementSystem::getEraConfig(HistoricalEra era) {
@@ -57,7 +316,7 @@ std::string AdvancementSystem::getEraName(HistoricalEra era) {
 
 std::string AdvancementSystem::getEraDescription(HistoricalEra era) {
     const auto& cfg = getEraConfig(era);
-    return std::string(cfg.faith_concept) + " | Threat: " + std::string(cfg.primary_threat);
+    return std::string(cfg.faith_concept) + " | Amenaza: " + std::string(cfg.primary_threat);
 }
 
 HistoricalEra AdvancementSystem::getEraForYear(int year) {
@@ -78,6 +337,98 @@ const AdvancementDoc* AdvancementSystem::getDocInfo(DoctrineType doc) const {
     return nullptr;
 }
 
+const FaithAdvancement* AdvancementSystem::getAdvancement(int id) const {
+    for (const auto& adv : m_advancementTree) {
+        if (adv.id == id) return &adv;
+    }
+    return nullptr;
+}
+
+bool AdvancementSystem::canConvalidate(const Religion& rel, int advId) const {
+    if (rel.hasAdvancement(advId)) return false; // Ya convalidado
+    const FaithAdvancement* adv = getAdvancement(advId);
+    if (!adv) return false;
+
+    // Verificar Fe / Piedad suficiente
+    if (rel.theologyPoints < adv->faithCost) return false;
+
+    // Verificar que cumpla todos los prerrequisitos
+    for (int reqId : adv->prerequisites) {
+        if (!rel.hasAdvancement(reqId)) {
+            return false;
+        }
+    }
+
+    // Para hitos de era, no ascender si ya se encuentra en o por encima de esa era
+    if (adv->isEraCapstone) {
+        if (static_cast<int>(adv->unlocksEra) <= static_cast<int>(rel.currentEra)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool AdvancementSystem::convalidateAdvancement(Religion& rel, int advId, int currentYear,
+                                              std::vector<GameEvent>& outEvents) {
+    if (!canConvalidate(rel, advId)) return false;
+    const FaithAdvancement* adv = getAdvancement(advId);
+    if (!adv) return false;
+
+    // Descontar costo en puntos de fe / piedad
+    rel.theologyPoints -= adv->faithCost;
+    rel.addAdvancement(advId);
+
+    // Aplicar mejoras acumulativas a la replicación y estabilidad de la fe
+    rel.zeal = std::clamp(rel.zeal + adv->zealBonus, 0.1f, 1.0f);
+    rel.cohesion = std::clamp(rel.cohesion + adv->cohesionBonus, 0.1f, 1.0f);
+    rel.diffusionMultiplier += adv->diffusionBonus;
+    rel.harvestYieldBonus += adv->popGrowthBonus;
+    rel.holySitePowerMultiplier += adv->holySiteBonus;
+    rel.passiveFaithBonusPerYear += adv->passiveFaithPerYear;
+
+    // Generar evento sagrado
+    GameEvent ev;
+    ev.year = currentYear;
+    ev.location = {0, 0};
+    ev.religionAId = rel.id;
+    ev.badgeColor = rel.color;
+
+    if (adv->isEraCapstone) {
+        // Salto de Era formal
+        rel.currentEra = adv->unlocksEra;
+        rel.advancementLevel = static_cast<int>(adv->unlocksEra) + 1;
+
+        ev.category = EventCategory::EraAdvancement;
+        ev.isTurningPoint = true;
+        ev.title = rel.name + " Asciende a " + getEraName(adv->unlocksEra);
+        ev.description = "Mediante el hito '" + adv->name + "', los fieles de " + rel.name +
+                         " han transformado su fe y cruzado a una nueva Era: " + getEraDescription(adv->unlocksEra);
+        ev.actorName = "Pueblo Sagrado de " + rel.name;
+        ev.consequence = "Salto de Era civilizatoria y desbloqueo de doctrinas teologicas superiores";
+    } else {
+        ev.category = EventCategory::Discovery;
+        ev.isTurningPoint = (adv->tier >= 2);
+        ev.title = "Doctrina Convalidada: " + adv->name;
+        ev.description = "La fe de " + rel.name + " ha integrado la doctrina sagrada '" + adv->name + "'. " + adv->description;
+        ev.actorName = "Consejo Liturgico de " + rel.name;
+        ev.consequence = adv->mechanicalBonus;
+    }
+
+    outEvents.push_back(ev);
+    return true;
+}
+
+int AdvancementSystem::getConvalidatedCountForEra(const Religion& rel, HistoricalEra era) const {
+    int count = 0;
+    for (const auto& adv : m_advancementTree) {
+        if (adv.era == era && rel.hasAdvancement(adv.id)) {
+            count++;
+        }
+    }
+    return count;
+}
+
 void AdvancementSystem::updateAdvancements(ReligionRegistry& registry, int currentYear,
                                           std::vector<GameEvent>& outEvents) {
     EraType worldEra = getEraForYear(currentYear);
@@ -85,13 +436,16 @@ void AdvancementSystem::updateAdvancements(ReligionRegistry& registry, int curre
     for (auto& r : registry.getAllReligions()) {
         if (r.isExtinct) continue;
 
-        // Theology score gains from followers, holy sites, and scholasticism
+        // Puntos de teología/fe generados por seguidores, lugares sagrados y escolasticismo
         float pointGain = (r.totalFollowers * 0.0005f) +
                           (r.holySitesCount * 4.0f) +
                           (r.scholasticism * 10.0f) + 1.0f;
         r.theologyPoints += static_cast<int>(pointGain);
 
-        // Check if religion transitions to new era
+        // Bonificación pasiva de fe proveniente de avances convalidados
+        r.theologyPoints += r.passiveFaithBonusPerYear;
+
+        // Transición temporal de Era mundial si el tiempo histórico supera la era actual
         if (static_cast<int>(worldEra) > static_cast<int>(r.currentEra)) {
             r.currentEra = worldEra;
             r.advancementLevel = static_cast<int>(worldEra) + 1;
@@ -101,12 +455,25 @@ void AdvancementSystem::updateAdvancements(ReligionRegistry& registry, int curre
             ev.category = EventCategory::EraAdvancement;
             ev.religionAId = r.id;
             ev.badgeColor = r.color;
-            ev.title = r.name + " Enters " + getEraName(worldEra);
-            ev.description = "The followers of " + r.name + " have crossed into a new epoch: " + getEraDescription(worldEra);
+            ev.title = r.name + " Entra en " + getEraName(worldEra);
+            ev.description = "Los fieles de " + r.name + " han cruzado a una nueva epoca: " + getEraDescription(worldEra);
+            ev.isTurningPoint = true;
+            ev.actorName = "Pueblo de " + r.name;
+            ev.consequence = "Salto de Era civilizatorio y transformacion cultural";
             outEvents.push_back(ev);
         }
 
-        // Try unlocking doctrines matching this era
+        // Si la religión es controlada por la IA (ID != 1), evaluar convalidar avances autónomamente
+        if (r.id != 1) {
+            for (const auto& adv : m_advancementTree) {
+                if (canConvalidate(r, adv.id) && r.theologyPoints >= static_cast<int>(adv.faithCost * 1.25f)) {
+                    convalidateAdvancement(r, adv.id, currentYear, outEvents);
+                    break; // Un avance por ciclo para progresión gradual
+                }
+            }
+        }
+
+        // Compatibilidad con catálogo de doctrinas heredadas
         for (const auto& doc : m_doctrineCatalog) {
             if (static_cast<int>(doc.era) <= static_cast<int>(r.currentEra)) {
                 if (!r.hasDoctrine(doc.type) && r.theologyPoints >= doc.theologyCost) {

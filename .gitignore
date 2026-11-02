@@ -6,6 +6,10 @@
 *.so
 *.ppm
 
+# Scratch and temporary testing files
+/scratch/
+crop_*.png
+
 # Local save games
 /saves/
 

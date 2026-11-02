@@ -25,7 +25,9 @@ enum class HumanAIState {
     WORSHIPING,       // Canalizando Fervor / Devoción hacia el altar
     SOCIALIZING,      // Fortaleciendo lazos de tribu (Inercia de conversión)
     CONVERTING,       // Intentando influenciar a otras unidades
-    MIGRATING         // Desplazamiento autónomo
+    MIGRATING,        // Desplazamiento autónomo
+    DEFENDING,        // Defensa activa ante invasores o peligros
+    ATTACKING         // Ofensiva o combate directo contra enemigos
 };
 
 // Estructura principal que define a una unidad humana viva con todos sus atributos sistémicos
@@ -68,6 +70,15 @@ public:
     // Método principal de actualización para la IA individual de cada humano
     void UpdateHumanAI(HumanUnit& human, const UnitEnvironmentContext& env, float deltaTime) {
         
+        // 0. Si la unidad está en combate defensivo u ofensivo activo, mantener la postura
+        if (human.currentState == HumanAIState::DEFENDING || human.currentState == HumanAIState::ATTACKING) {
+            human.energy = std::max(0.0f, human.energy - 2.5f * deltaTime);
+            if (human.hitPoints < 20.0f && human.role != CommunityRole::ZEALOT) {
+                human.currentState = HumanAIState::SURVIVAL_WORKING;
+            }
+            return;
+        }
+
         // 1. Prioridad Absoluta: Supervivencia Biológica y Recuperación de Energía
         if (human.energy < 25.0f || human.nutritionalState < 30.0f) {
             human.currentState = HumanAIState::SURVIVAL_WORKING;

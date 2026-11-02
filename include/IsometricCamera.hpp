@@ -25,6 +25,10 @@ public:
 
     void centerOnCell(int gridX, int gridY, int mapWidth, int mapHeight);
     void reset(int mapWidth, int mapHeight);
+    void addScreenShake(float intensity, float duration);
+    float getShakeIntensity() const { return m_shakeIntensity; }
+    float getShakeOffsetX() const { return m_shakeOffsetX; }
+    float getShakeOffsetY() const { return m_shakeOffsetY; }
 
     // Coordinate conversion
     Vec2 gridToScreen(float gx, float gy, float elevation = 0.0f) const;
@@ -33,6 +37,8 @@ public:
 
     float getCameraX() const { return m_cameraX; }
     float getCameraY() const { return m_cameraY; }
+    int getScreenWidth() const { return m_screenWidth; }
+    int getScreenHeight() const { return m_screenHeight; }
 
 private:
     int m_screenWidth{1280};
@@ -53,6 +59,14 @@ private:
     float m_dragStartY{0.0f};
     float m_camStartX{0.0f};
     float m_camStartY{0.0f};
+
+    // Sacudida sísmica de pantalla (Screen Shake por terremotos/catástrofes)
+    float m_shakeIntensity{0.0f};
+    float m_shakeDuration{0.0f};
+    float m_shakeTimer{0.0f};
+    float m_shakeSeed{0.0f};
+    float m_shakeOffsetX{0.0f};
+    float m_shakeOffsetY{0.0f};
 };
 
 } // namespace ReligionSim

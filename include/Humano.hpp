@@ -4,8 +4,12 @@
 #include "TileSet.hpp"
 #include "FirstEraAIController.hpp"
 #include "HumanAIController.hpp"
+#include "RagdollSystem.hpp"
+#include "ReligiousMoralitySystem.hpp"
 #include <string>
 #include <vector>
+#include <cmath>
+#include <algorithm>
 
 namespace ReligionSim {
 
@@ -13,42 +17,237 @@ class WorldMap;
 class ReligionRegistry;
 class IsometricCamera;
 class EventLine;
+class SoundSystem;
+class NemesisSififusManager;
+class ReligiousMoralitySystem;
+class DayNightCycle;
+class BuildingSystem;
+
+// EN: Biological human gender enumeration
+// ES: Enumeración biológica de género humano
+enum class HumanGender : uint8_t {
+    Male = 0,
+    Female = 1,
+    HOMBRE = Male,
+    MUJER = Female
+};
+using GeneroHumano = HumanGender;
 
 class Humano {
 public:
-    Humano(int id = 1, const std::string& nombre = "Grog", float inicioX = 20.5f, float inicioY = 20.5f);
+    Humano(int id = 1, const std::string& name = "Grog", float startX = 20.5f, float startY = 20.5f,
+           HumanGender gender = HumanGender::Male);
 
-    // Getters y Setters
-    int getId() const { return m_id; }
-    const std::string& getNombre() const { return m_nombre; }
-    void setNombre(const std::string& nombre) {
-        m_nombre = nombre;
-        m_humanUnit.unitName = nombre;
+    // EN: Procedural name generator based on gender and shamanic role
+    // ES: Generador procedural de nombres según género y rol
+    static std::string generateName(HumanGender gender, bool isShaman = false);
+    inline static std::string generarNombre(HumanGender gender, bool isShaman = false) {
+        return generateName(gender, isShaman);
     }
+
+    // EN: Biological gender and identity
+    // ES: Identidad biológica y de género
+    HumanGender getGender() const { return m_gender; }
+    void setGender(HumanGender gender) { m_gender = gender; }
+    bool isFemale() const { return m_gender == HumanGender::Female; }
+    bool isMale() const { return m_gender == HumanGender::Male; }
+
+    inline HumanGender getGenero() const { return getGender(); }
+    inline void setGenero(HumanGender gender) { setGender(gender); }
+    inline bool esMujer() const { return isFemale(); }
+    inline bool esHombre() const { return isMale(); }
+
+    // EN: Affection, courtship, and spouse marriage system
+    // ES: Sistema de Afecto, Cortejo y Matrimonio
+    bool hasSpouse() const { return m_spouseId > 0; }
+    int getSpouseId() const { return m_spouseId; }
+    void setSpouseId(int spouseId) { m_spouseId = spouseId; }
+    float getSpouseAffection() const { return m_spouseAffection; }
+    void setSpouseAffection(float affection) { m_spouseAffection = std::clamp(affection, 0.0f, 1.0f); }
+    void modifyAffection(float deltaAffection) { m_spouseAffection = std::clamp(m_spouseAffection + deltaAffection, 0.0f, 1.0f); }
+
+    inline bool tienePareja() const { return hasSpouse(); }
+    inline int getParejaId() const { return getSpouseId(); }
+    inline void setParejaId(int spouseId) { setSpouseId(spouseId); }
+    inline float getAmorHaciaPareja() const { return getSpouseAffection(); }
+    inline void setAmorHaciaPareja(float affection) { setSpouseAffection(affection); }
+    inline void modificarAmor(float deltaAffection) { modifyAffection(deltaAffection); }
+
+    // EN: Conception, gestation, and biological procreation system
+    // ES: Sistema de Concepción, Gestación y Procreación
+    bool isPregnant() const { return m_isPregnant; }
+    void setPregnant(bool isPregnant) { m_isPregnant = isPregnant; if (!isPregnant) m_pregnancyProgress = 0.0f; }
+    float getPregnancyProgress() const { return m_pregnancyProgress; }
+    void setPregnancyProgress(float progress) { m_pregnancyProgress = std::clamp(progress, 0.0f, 1.0f); }
+    void advancePregnancy(float deltaProgress) { m_pregnancyProgress = std::clamp(m_pregnancyProgress + deltaProgress, 0.0f, 1.0f); }
+    float getFertilityCooldown() const { return m_fertilityCooldown; }
+    void setFertilityCooldown(float cooldown) { m_fertilityCooldown = std::max(0.0f, cooldown); }
+    void reduceFertilityCooldown(float deltaTime) { m_fertilityCooldown = std::max(0.0f, m_fertilityCooldown - deltaTime); }
+
+    inline bool estaEmbarazada() const { return isPregnant(); }
+    inline void setEmbarazada(bool isPregnant) { setPregnant(isPregnant); }
+    inline float getEmbarazoProgreso() const { return getPregnancyProgress(); }
+    inline void setEmbarazoProgreso(float progress) { setPregnancyProgress(progress); }
+    inline void avanzarEmbarazo(float deltaProgress) { advancePregnancy(deltaProgress); }
+    inline float getFertilidadCooldown() const { return getFertilityCooldown(); }
+    inline void setFertilidadCooldown(float cooldown) { setFertilityCooldown(cooldown); }
+    inline void reducirFertilidadCooldown(float deltaTime) { reduceFertilityCooldown(deltaTime); }
+
+    // EN: Lineage, descent, and life cycle (infancy to adulthood)
+    // ES: Linaje, Descendencia y Ciclo Vital (Infancia a Adultez)
+    float getAge() const { return m_age; }
+    void setAge(float age) { m_age = std::max(0.0f, age); }
+    void advanceAge(float deltaAge) { m_age += deltaAge; }
+    bool isChild() const { return m_isChild; }
+    void setChild(bool isChild) { m_isChild = isChild; }
+    int getFatherId() const { return m_fatherId; }
+    void setFatherId(int fatherId) { m_fatherId = fatherId; }
+    int getMotherId() const { return m_motherId; }
+    void setMotherId(int motherId) { m_motherId = motherId; }
+    int getChildrenCount() const { return m_childrenCount; }
+    void setChildrenCount(int count) { m_childrenCount = std::max(0, count); }
+    void incrementChildren() { ++m_childrenCount; }
+    const std::vector<int>& getChildrenIds() const { return m_childrenIds; }
+    void registerChild(int childId) {
+        if (std::find(m_childrenIds.begin(), m_childrenIds.end(), childId) == m_childrenIds.end()) {
+            m_childrenIds.push_back(childId);
+        }
+        m_childrenCount = static_cast<int>(m_childrenIds.size());
+    }
+
+    inline float getEdad() const { return getAge(); }
+    inline void setEdad(float age) { setAge(age); }
+    inline void avanzarEdad(float deltaAge) { advanceAge(deltaAge); }
+    inline bool esNino() const { return isChild(); }
+    inline void setEsNino(bool isChild) { setChild(isChild); }
+    inline int getPadreId() const { return getFatherId(); }
+    inline void setPadreId(int fatherId) { setFatherId(fatherId); }
+    inline int getMadreId() const { return getMotherId(); }
+    inline void setMadreId(int motherId) { setMotherId(motherId); }
+    inline int getHijosCount() const { return getChildrenCount(); }
+    inline void setHijosCount(int count) { setChildrenCount(count); }
+    inline void incrementarHijos() { incrementChildren(); }
+    inline const std::vector<int>& getHijosIds() const { return getChildrenIds(); }
+    inline void registrarHijo(int childId) { registerChild(childId); }
+
+    // EN: Circadian rhythm, biological sleep, and rest
+    // ES: Sistema Circadiano, Sueño y Descanso Biológico
+    bool isSleeping() const { return m_isSleeping; }
+    bool isSleepingIndoors() const { return m_isSleeping && m_isSleepingIndoors; }
+    void setSleeping(bool isSleeping) {
+        m_isSleeping = isSleeping;
+        if (isSleeping) {
+            m_action = HumanAction::IDLE;
+            m_speed = 0.0f;
+        } else {
+            m_isSleepingIndoors = false;
+            m_speed = 0.65f;
+        }
+    }
+    void setSleepingIndoors(bool isIndoors) {
+        m_isSleepingIndoors = isIndoors;
+        if (isIndoors) {
+            m_isSleeping = true;
+            m_action = HumanAction::IDLE;
+        }
+    }
+    float getSleepNeed() const { return m_sleepNeed; }
+    void setSleepNeed(float need) { m_sleepNeed = std::clamp(need, 0.0f, 100.0f); }
+    void modifySleepNeed(float deltaNeed) { m_sleepNeed = std::clamp(m_sleepNeed + deltaNeed, 0.0f, 100.0f); }
+
+    inline bool estaDurmiendo() const { return isSleeping(); }
+    inline bool estaDurmiendoBajoTecho() const { return isSleepingIndoors(); }
+    inline void setDurmiendo(bool isSleeping) { setSleeping(isSleeping); }
+    inline void setDurmiendoBajoTecho(bool isIndoors) { setSleepingIndoors(isIndoors); }
+    inline float getSueno() const { return getSleepNeed(); }
+    inline void setSueno(float need) { setSleepNeed(need); }
+    inline void modificarSueno(float deltaNeed) { modifySleepNeed(deltaNeed); }
+
+    // EN: Familial protective fury and protective bonds
+    // ES: Instinto Protector Familiar y Vínculos de Sangre
+    bool hasProtectiveFury() const { return m_protectiveFuryTimer > 0.0f; }
+    void activateProtectiveFury(float duration = 7.0f) {
+        m_protectiveFuryTimer = duration;
+        m_isSleeping = false;
+        m_isSleepingIndoors = false;
+    }
+    float getProtectiveFuryTimer() const { return m_protectiveFuryTimer; }
+    int getTargetProtectedId() const { return m_targetProtectedId; }
+    void setTargetProtectedId(int protectedId) { m_targetProtectedId = protectedId; }
+
+    inline bool tieneFuriaProtectora() const { return hasProtectiveFury(); }
+    inline void activarFuriaProtectora(float duration = 7.0f) { activateProtectiveFury(duration); }
+    inline float getFuriaProtectoraTimer() const { return getProtectiveFuryTimer(); }
+    inline int getTargetProtegidoId() const { return getTargetProtectedId(); }
+    inline void setTargetProtegidoId(int protectedId) { setTargetProtectedId(protectedId); }
+
+    // EN: Home, dwelling, and shelter necessity system
+    // ES: Sistema de Hogar, Vivienda y Construcción por Necesidad
+    bool hasHome() const { return m_homeId > 0; }
+    int getHomeId() const { return m_homeId; }
+    void setHomeId(int homeId) { m_homeId = homeId; }
+    float getNeedForShelter() const { return m_needForShelter; }
+    void setNeedForShelter(float need) { m_needForShelter = std::clamp(need, 0.0f, 1.0f); }
+    void modifyNeedForShelter(float deltaNeed) { m_needForShelter = std::clamp(m_needForShelter + deltaNeed, 0.0f, 1.0f); }
+    bool isBuildingHome() const { return m_isBuildingHome; }
+    void setIsBuildingHome(bool isBuilding) { m_isBuildingHome = isBuilding; }
+
+    inline bool tieneHogar() const { return hasHome(); }
+    inline void modificarNeedForShelter(float deltaNeed) { modifyNeedForShelter(deltaNeed); }
+    inline bool estaConstruyendoHogar() const { return isBuildingHome(); }
+    inline void setEstaConstruyendoHogar(bool isBuilding) { setIsBuildingHome(isBuilding); }
+
+    // EN: Identity and spatial coordinates
+    // ES: Identidad y coordenadas espaciales
+    int getId() const { return m_id; }
+    const std::string& getName() const { return m_name; }
+    void setName(const std::string& unitName) {
+        m_name = unitName;
+        m_humanUnit.unitName = unitName;
+    }
+    inline const std::string& getNombre() const { return getName(); }
+    inline void setNombre(const std::string& unitName) { setName(unitName); }
 
     float getX() const { return m_x; }
     float getY() const { return m_y; }
-    int getCeldaX() const { return m_celdaX; }
-    int getCeldaY() const { return m_celdaY; }
+    int getCellX() const { return m_cellX; }
+    int getCellY() const { return m_cellY; }
+    void setPosition(float posX, float posY) {
+        m_x = posX;
+        m_y = posY;
+        m_cellX = static_cast<int>(std::floor(m_x));
+        m_cellY = static_cast<int>(std::floor(m_y));
+        m_humanUnit.position = {m_x, m_y};
+    }
+    inline int getCeldaX() const { return getCellX(); }
+    inline int getCeldaY() const { return getCellY(); }
+    inline void setPosicion(float posX, float posY) { setPosition(posX, posY); }
 
-    AccionHumano getAccion() const { return m_accion; }
-    DireccionIso getDireccion() const { return m_direccion; }
+    HumanAction getAction() const { return m_action; }
+    IsoDirection getDirection() const { return m_direction; }
+    float getSpeed() const { return m_speed; }
+    void setSpeed(float speed) { m_speed = speed; }
+
+    inline HumanAction getAccion() const { return getAction(); }
+    inline IsoDirection getDireccion() const { return getDirection(); }
+    inline float getVelocidad() const { return getSpeed(); }
+    inline void setVelocidad(float speed) { setSpeed(speed); }
 
     int getReligionId() const { return m_religionId; }
-    void setReligionId(int rId) { m_religionId = rId; }
+    void setReligionId(int religionId) { m_religionId = religionId; }
 
-    float getDevocion() const { return m_devocion; }
-    void setDevocion(float d) {
-        float viejo = m_devocion;
-        m_devocion = std::clamp(d, 0.0f, 1.0f);
-        m_humanUnit.devotion = m_devocion * 100.0f;
-        float diff = m_devocion - viejo;
-        if (diff >= 0.012f) {
+    float getDevotion() const { return m_devotion; }
+    void setDevotion(float devotion) {
+        float previousDevotion = m_devotion;
+        m_devotion = std::clamp(devotion, 0.0f, 1.0f);
+        m_humanUnit.devotion = m_devotion * 100.0f;
+        float devotionDifference = m_devotion - previousDevotion;
+        if (devotionDifference >= 0.012f) {
             triggerFaithIndicator(+1);
-        } else if (diff <= -0.012f) {
+        } else if (devotionDifference <= -0.012f) {
             triggerFaithIndicator(-1);
         } else {
-            m_faithDeltaAccum += diff;
+            m_faithDeltaAccum += devotionDifference;
             if (m_faithDeltaAccum >= 0.018f) {
                 triggerFaithIndicator(+1);
             } else if (m_faithDeltaAccum <= -0.018f) {
@@ -56,167 +255,576 @@ public:
             }
         }
     }
+    inline float getDevocion() const { return getDevotion(); }
+    inline void setDevocion(float devotion) { setDevotion(devotion); }
 
     int getFaithIndicatorSign() const { return m_faithIndicatorSign; }
     float getFaithIndicatorTimer() const { return m_faithIndicatorTimer; }
-    void triggerFaithIndicator(int sign, float duracion = 1.35f) {
+    void triggerFaithIndicator(int sign, float duration = 1.35f) {
         if (sign == 0) return;
         m_faithIndicatorSign = sign;
-        m_faithIndicatorTimer = duracion;
+        m_faithIndicatorTimer = duration;
         m_faithDeltaAccum = 0.0f;
     }
 
-    bool esChaman() const { return m_esChaman; }
-    void setEsChaman(bool chaman) {
-        m_esChaman = chaman;
-        if (chaman) {
+    bool isShaman() const { return m_isShaman || m_humanUnit.role == CommunityRole::SHAMAN; }
+    void setShaman(bool isShaman) {
+        m_isShaman = isShaman;
+        if (isShaman) {
             m_humanUnit.role = CommunityRole::SHAMAN;
             m_humanUnit.conversionPower = 38.0f;
             m_humanUnit.conversionInertia = 85.0f;
             m_humanUnit.willpower = 92.0f;
+            m_leaderDevotion = 1.0f;
+        } else if (m_humanUnit.role == CommunityRole::SHAMAN) {
+            m_humanUnit.role = CommunityRole::FORAGER;
         }
     }
+    inline bool esChaman() const { return isShaman(); }
+    inline void setEsChaman(bool isShaman) { setShaman(isShaman); }
 
-    float getTimerSenalDivina() const { return m_timerSenalDivina; }
-    void activarSenalDivina(float duracion = 5.5f) {
-        m_timerSenalDivina = duracion;
-        m_timerEstado = duracion;
-        m_accion = AccionHumano::SALUDAR;
-        m_devocion = 1.0f;
+    bool isProphet() const { return m_humanUnit.role == CommunityRole::PROPHET; }
+    void setProphet(bool isProphet) {
+        if (isProphet) {
+            m_isShaman = false;
+            m_humanUnit.role = CommunityRole::PROPHET;
+            m_humanUnit.conversionPower = 48.0f;
+            m_humanUnit.conversionInertia = 90.0f;
+            m_humanUnit.willpower = 95.0f;
+            m_leaderDevotion = 1.0f;
+        } else if (m_humanUnit.role == CommunityRole::PROPHET) {
+            m_humanUnit.role = CommunityRole::FORAGER;
+        }
+    }
+    inline bool esProfeta() const { return isProphet(); }
+    inline void setEsProfeta(bool isProphet) { setProphet(isProphet); }
+
+    bool isSpiritualLeader() const {
+        return isShaman() || isProphet();
+    }
+    inline bool esLiderEspiritual() const { return isSpiritualLeader(); }
+
+    float getLeaderDevotion() const { return m_leaderDevotion; }
+    void setLeaderDevotion(float leaderDevotion) { m_leaderDevotion = std::clamp(leaderDevotion, 0.0f, 1.0f); }
+    int getLeaderId() const { return m_leaderId; }
+    void setLeaderId(int leaderId) { m_leaderId = leaderId; }
+
+    bool isZealot() const {
+        return m_humanUnit.role == CommunityRole::ZEALOT;
+    }
+    inline bool esFanatico() const { return isZealot(); }
+    void promoteToZealot();
+    void demoteZealot();
+    inline void promoverAFanatico() { promoteToZealot(); }
+    inline void degradarFanatico() { demoteZealot(); }
+
+    bool canWalkOnWaterAndDangerousTerrain() const {
+        return isProphet();
+    }
+    inline bool puedeCaminarSobreAguaYTerrenoPeligroso() const { return canWalkOnWaterAndDangerousTerrain(); }
+
+    ResourceType getGatheringResourceType() const { return m_gatheringResourceType; }
+    void setGatheringResourceType(ResourceType resourceType) { m_gatheringResourceType = resourceType; }
+    ResourceType chooseGatheringResourceType(const WorldMap& mapRef, const VillageResources* villageResourcesRef = nullptr);
+    inline ResourceType getTipoRecursoRecolectando() const { return getGatheringResourceType(); }
+    inline void setTipoRecursoRecolectando(ResourceType resourceType) { setGatheringResourceType(resourceType); }
+    inline ResourceType elegirQueRecolectarSegunEntorno(const WorldMap& mapRef, const VillageResources* villageResourcesRef = nullptr) {
+        return chooseGatheringResourceType(mapRef, villageResourcesRef);
+    }
+
+    int getCarriedResourceAmount() const { return m_carriedResourceAmount; }
+    void setCarriedResourceAmount(int amount) { m_carriedResourceAmount = std::max(0, amount); }
+    int getCarryingCapacity() const { return m_carryingCapacity; }
+    void setCarryingCapacity(int capacity) { m_carryingCapacity = std::max(1, capacity); }
+    bool isCarryingCapacityFull() const { return m_carriedResourceAmount >= m_carryingCapacity; }
+
+    inline int getCantidadRecursoCargado() const { return getCarriedResourceAmount(); }
+    inline void setCantidadRecursoCargado(int amount) { setCarriedResourceAmount(amount); }
+    inline int getCapacidadCarga() const { return getCarryingCapacity(); }
+    inline void setCapacidadCarga(int capacity) { setCarryingCapacity(capacity); }
+    inline bool estaLlenoDeCarga() const { return isCarryingCapacityFull(); }
+
+    float getSpiritualHunger() const { return m_spiritualHunger; }
+    void setSpiritualHunger(float hunger) { m_spiritualHunger = std::clamp(hunger, 0.0f, 100.0f); }
+    bool isDeliveringOffering() const { return m_isDeliveringOffering; }
+    void setDeliveringOffering(bool isDelivering) { m_isDeliveringOffering = isDelivering; }
+
+    int getTargetEnemyId() const { return m_targetEnemyId; }
+    void setTargetEnemyId(int enemyId) { m_targetEnemyId = enemyId; }
+    float getAttackCooldown() const { return m_attackCooldown; }
+    void setAttackCooldown(float cooldown) { m_attackCooldown = std::max(0.0f, cooldown); }
+
+    // EN: Spatial environmental map queries
+    // ES: Búsquedas sistémicas en el mapa
+    bool findResourceNode(const WorldMap& mapRef, ResourceType resourceType, int maxRadius, Point2i& outCellPos) const;
+    bool findShrineOrAltar(const WorldMap& mapRef, int religionId, int maxRadius, Point2i& outCellPos) const;
+    bool findCommunityCenter(const WorldMap& mapRef, int religionId, int maxRadius, Point2i& outCellPos) const;
+
+    inline bool buscarNodoRecurso(const WorldMap& mapRef, ResourceType resourceType, int maxRadius, Point2i& outCellPos) const {
+        return findResourceNode(mapRef, resourceType, maxRadius, outCellPos);
+    }
+    inline bool buscarSantuarioOAltar(const WorldMap& mapRef, int religionId, int maxRadius, Point2i& outCellPos) const {
+        return findShrineOrAltar(mapRef, religionId, maxRadius, outCellPos);
+    }
+    inline bool buscarCentroComunidad(const WorldMap& mapRef, int religionId, int maxRadius, Point2i& outCellPos) const {
+        return findCommunityCenter(mapRef, religionId, maxRadius, outCellPos);
+    }
+
+    float getDivineSignTimer() const { return m_divineSignTimer; }
+    void activateDivineSign(float duration = 5.5f) {
+        m_divineSignTimer = duration;
+        m_stateTimer = duration;
+        m_action = HumanAction::CELEBRATE;
+        m_devotion = 1.0f;
         m_humanUnit.devotion = 100.0f;
         m_humanUnit.energy = 100.0f;
         m_humanUnit.currentState = HumanAIState::WORSHIPING;
         triggerFaithIndicator(+1, 1.6f);
     }
+    inline float getTimerSenalDivina() const { return getDivineSignTimer(); }
+    inline void activarSenalDivina(float duration = 5.5f) { activateDivineSign(duration); }
 
-    float getSalud() const { return m_salud; }
-    bool estaVivo() const { return m_salud > 0.0f; }
-    bool estaMuerto() const { return m_salud <= 0.0f; }
-    float getTimerMuerte() const { return m_timerMuerte; }
+    float getHealth() const { return m_health; }
+    bool isAlive() const { return m_health > 0.0f; }
+    bool isDead() const { return m_health <= 0.0f; }
+    float getDeathTimer() const { return m_deathTimer; }
 
-    void setSalud(float s) {
-        m_salud = std::clamp(s, 0.0f, 100.0f);
-        m_humanUnit.hitPoints = m_salud;
-        if (m_salud <= 0.0f && m_timerMuerte <= 0.0f) {
-            m_timerMuerte = 1.6f;
-            m_accion = AccionHumano::IDLE;
-            m_velocidad = 0.0f;
+    inline float getSalud() const { return getHealth(); }
+    inline bool estaVivo() const { return isAlive(); }
+    inline bool estaMuerto() const { return isDead(); }
+    inline float getTimerMuerte() const { return getDeathTimer(); }
+
+    void setHealth(float health) {
+        m_health = std::clamp(health, 0.0f, 100.0f);
+        m_humanUnit.hitPoints = m_health;
+        if (m_health <= 0.0f && m_deathTimer <= 0.0f) {
+            kill("Pérdida total de salud");
         }
     }
-    void recibirDano(float cantidad) {
-        if (cantidad <= 0.0f || m_salud <= 0.0f) return;
-        m_salud = std::max(0.0f, m_salud - cantidad);
-        m_humanUnit.hitPoints = m_salud;
-        m_timerDano = 0.65f;
-        if (m_salud <= 0.0f && m_timerMuerte <= 0.0f) {
-            m_timerMuerte = 1.6f;
-            m_accion = AccionHumano::IDLE;
-            m_velocidad = 0.0f;
+    void takeDamage(float damageAmount) {
+        if (damageAmount <= 0.0f || m_health <= 0.0f) return;
+        m_health = std::max(0.0f, m_health - damageAmount);
+        m_humanUnit.hitPoints = m_health;
+        m_damageTimer = 0.65f;
+        m_isSleeping = false;
+        m_isSleepingIndoors = false;
+        if (m_health <= 0.0f && m_deathTimer <= 0.0f) {
+            kill("Caído en combate");
         }
     }
-    float getTimerDano() const { return m_timerDano; }
-    float getEnergia() const { return m_energia; }
+    float getDamageTimer() const { return m_damageTimer; }
+    float getEnergy() const { return m_energy; }
+    void setEnergy(float energy) {
+        m_energy = std::clamp(energy, 0.0f, 100.0f);
+        m_humanUnit.energy = m_energy;
+    }
+    void modifyEnergy(float deltaEnergy) { setEnergy(m_energy + deltaEnergy); }
 
-    // Estructura demográfica y motivacional de la Primera Era (FirstEraAIController)
+    inline void setSalud(float health) { setHealth(health); }
+    inline void recibirDano(float damageAmount) { takeDamage(damageAmount); }
+    inline float getTimerDano() const { return getDamageTimer(); }
+    inline float getEnergia() const { return getEnergy(); }
+    inline void setEnergia(float energy) { setEnergy(energy); }
+    inline void modificarEnergia(float deltaEnergy) { modifyEnergy(deltaEnergy); }
+
     const RealisticPopGroup& getPopGroup() const { return m_popGroup; }
     RealisticPopGroup& getPopGroupMutable() { return m_popGroup; }
     RealisticVillagerState getRealisticState() const { return m_popGroup.state; }
 
-    // Estructura sistémica individual de la unidad humana (HumanAIController)
     const HumanUnit& getHumanUnit() const { return m_humanUnit; }
     HumanUnit& getHumanUnitMutable() { return m_humanUnit; }
     CommunityRole getRole() const { return m_humanUnit.role; }
-    void setRole(CommunityRole r) { m_humanUnit.role = r; }
+    void setRole(CommunityRole role) {
+        m_humanUnit.role = role;
+        if (role == CommunityRole::ZEALOT) {
+            m_humanUnit.conversionInertia = 95.0f;
+            m_humanUnit.willpower = 95.0f;
+            m_humanUnit.conversionPower = 28.0f;
+            m_devotion = std::max(m_devotion, 0.92f);
+            m_leaderDevotion = std::max(m_leaderDevotion, 0.90f);
+            m_humanUnit.devotion = m_devotion * 100.0f;
+        }
+    }
     HumanAIState getHumanAIState() const { return m_humanUnit.currentState; }
 
-    // Control de comportamiento y animación
-    void actualizar(float dt, const WorldMap& mapa);
-    void cambiarAccion(AccionHumano nuevaAccion);
-    void cambiarDireccion(DireccionIso nuevaDir);
-    void orientarHacia(float destX, float destY);
-    void caminarHacia(float destX, float destY, bool corriendo = false);
-    void ordenarMovimientoManual(float destX, float destY);
-    bool tieneOrdenManual() const { return m_ordenManual; }
-    float getDestinoX() const { return m_destinoX; }
-    float getDestinoY() const { return m_destinoY; }
+    const UnitMoralRecord& getMoralRecord() const { return m_moralRecord; }
+    UnitMoralRecord& getMoralRecordMutable() { return m_moralRecord; }
+    bool isApostate() const { return m_moralRecord.isApostateOrHeretic; }
+    inline bool esApostata() const { return isApostate(); }
 
-    // Obtener el recorte del tileset para este Humano
-    TileRect getTileRect(const TileSet& tileset) const;
+    AIDifficulty getAIDifficulty() const { return m_aiDifficulty; }
+    void setAIDifficulty(AIDifficulty difficulty) { m_aiDifficulty = difficulty; }
+    TribalBelligerence getTribalBelligerence() const { return m_tribalBelligerence; }
+    void setTribalBelligerence(TribalBelligerence belligerence) { m_tribalBelligerence = belligerence; }
 
-    // Renderizar al humano en el buffer usando el TileSet del usuario
-    void renderizar(uint32_t* dstBuffer, int dstW, int dstH,
-                    const IsometricCamera& camara, const WorldMap& mapa,
-                    const TileSet& tileset, ColorRGB auraColor, bool seleccionado = false) const;
+    float getAltitude() const { return m_altitude; }
+    void setAltitude(float altitude) { m_altitude = altitude; }
+    bool isFlying() const { return m_flying; }
+    void setFlying(bool flying) { m_flying = flying; }
+    float getVelocityZ() const { return m_velocityZ; }
+    float getVelocityX() const { return m_velocityX; }
+    float getVelocityY() const { return m_velocityY; }
+
+    float getPanicTimer() const { return m_panicTimer; }
+    void setPanicTimer(float timer) { m_panicTimer = timer; }
+    bool isPanicking() const { return m_panicTimer > 0.0f; }
+    inline bool estaEnPanico() const { return isPanicking(); }
+    float getAnimTimer() const { return m_animTimer; }
+
+    float getStumbleTimer() const { return m_stumbleTimer; }
+    void setStumbleTimer(float timer) { m_stumbleTimer = timer; }
+
+    bool isInfected() const { return m_isInfected; }
+    void setInfected(bool infected) { m_isInfected = infected; }
+    float getInfectionTimer() const { return m_infectionTimer; }
+    float getCoughTimer() const { return m_coughTimer; }
+
+    bool isDrowning() const { return m_isDrowning; }
+    void setDrowning(bool drowning) { m_isDrowning = drowning; }
+    bool isSwimming() const { return m_isSwimming; }
+    void setSwimming(bool swimming) { m_isSwimming = swimming; }
+    const std::string& getCauseOfDeath() const { return m_causeOfDeath; }
+    void setCauseOfDeath(const std::string& cause) { m_causeOfDeath = cause; }
+    void kill(const std::string& cause = "Fallecimiento");
+    inline void matar(const std::string& cause = "Fallecimiento") { kill(cause); }
+
+    void activateRagdoll(float impulseX, float impulseY, float impulseZ, float angularSpeedRadS = 12.0f);
+    inline void activarRagdoll(float impulseX, float impulseY, float impulseZ, float angularSpeedRadS = 12.0f) {
+        activateRagdoll(impulseX, impulseY, impulseZ, angularSpeedRadS);
+    }
+    bool isRagdoll() const { return m_ragdoll.isActive(); }
+    const Ragdoll& getRagdoll() const { return m_ragdoll; }
+    Ragdoll& getRagdollMutable() { return m_ragdoll; }
+
+    void fleeInPanicFrom(float originX, float originY, float duration = 5.0f);
+    inline void huirEnPanicoDesde(float originX, float originY, float duration = 5.0f) {
+        fleeInPanicFrom(originX, originY, duration);
+    }
+    void suckIntoTornado(float tornadoX, float tornadoY, float effectRadius, float deltaTime);
+    inline void serSuccionadoPorTornado(float tornadoX, float tornadoY, float effectRadius, float deltaTime) {
+        suckIntoTornado(tornadoX, tornadoY, effectRadius, deltaTime);
+    }
+    void sufferEarthquake(float quakeX, float quakeY, float intensity);
+    inline void sufrirSismoTerremoto(float quakeX, float quakeY, float intensity) {
+        sufferEarthquake(quakeX, quakeY, intensity);
+    }
+    void displaceByEarthquake(float offsetX, float offsetY, const WorldMap& mapRef);
+    inline void desplazarPorSismo(float offsetX, float offsetY, const WorldMap& mapRef) {
+        displaceByEarthquake(offsetX, offsetY, mapRef);
+    }
+    void infectWithPandemic(float duration = 18.0f);
+    inline void infectarConPandemia(float duration = 18.0f) {
+        infectWithPandemic(duration);
+    }
+    void processWaterFall(const WorldMap& mapRef);
+    inline void procesarCaidaEnAgua(const WorldMap& mapRef) {
+        processWaterFall(mapRef);
+    }
+    void processGroundLanding(const WorldMap& mapRef);
+    inline void procesarAterrizajeTierra(const WorldMap& mapRef) {
+        processGroundLanding(mapRef);
+    }
+    bool findNearbySolidGround(const WorldMap& mapRef, float& outWorldX, float& outWorldY) const;
+    inline bool buscarTierraFirmeCercana(const WorldMap& mapRef, float& outWorldX, float& outWorldY) const {
+        return findNearbySolidGround(mapRef, outWorldX, outWorldY);
+    }
+    void swimTowardsSolidGround(const WorldMap& mapRef);
+    inline void nadarHaciaTierraFirme(const WorldMap& mapRef) {
+        swimTowardsSolidGround(mapRef);
+    }
+
+    void update(float deltaTime, const WorldMap& mapRef,
+                const std::vector<Humano>* totalPopulation = nullptr,
+                bool isNightTime = false,
+                const BuildingSystem* buildingSystemRef = nullptr);
+    inline void actualizar(float deltaTime, const WorldMap& mapRef,
+                           const std::vector<Humano>* totalPopulation = nullptr,
+                           bool isNightTime = false,
+                           const BuildingSystem* buildingSystemRef = nullptr) {
+        update(deltaTime, mapRef, totalPopulation, isNightTime, buildingSystemRef);
+    }
+
+    void forceAIDecision(const WorldMap& mapRef,
+                         const std::vector<Humano>* totalPopulation = nullptr,
+                         bool isNightTime = false,
+                         const BuildingSystem* buildingSystemRef = nullptr) {
+        makeAIDecision(mapRef, totalPopulation, isNightTime, buildingSystemRef);
+    }
+    inline void forzarDecisionIA(const WorldMap& mapRef,
+                                 const std::vector<Humano>* totalPopulation = nullptr,
+                                 bool isNightTime = false,
+                                 const BuildingSystem* buildingSystemRef = nullptr) {
+        forceAIDecision(mapRef, totalPopulation, isNightTime, buildingSystemRef);
+    }
+    void makeAIDecision(const WorldMap& mapRef, const std::vector<Humano>* totalPopulation = nullptr,
+                        bool isNightTime = false, const BuildingSystem* buildingSystemRef = nullptr);
+    inline void tomarDecisionIA(const WorldMap& mapRef, const std::vector<Humano>* totalPopulation = nullptr,
+                                bool isNightTime = false, const BuildingSystem* buildingSystemRef = nullptr) {
+        makeAIDecision(mapRef, totalPopulation, isNightTime, buildingSystemRef);
+    }
+
+    void changeAction(HumanAction newAction);
+    inline void cambiarAccion(HumanAction newAction) { changeAction(newAction); }
+    void changeDirection(IsoDirection newDirection);
+    inline void cambiarDireccion(IsoDirection newDirection) { changeDirection(newDirection); }
+    void orientTowards(float targetPosX, float targetPosY);
+    inline void orientarHacia(float targetPosX, float targetPosY) { orientTowards(targetPosX, targetPosY); }
+    void walkTowards(float targetPosX, float targetPosY, bool isRunning = false);
+    inline void caminarHacia(float targetPosX, float targetPosY, bool isRunning = false) {
+        walkTowards(targetPosX, targetPosY, isRunning);
+    }
+    void orderManualMovement(float targetPosX, float targetPosY);
+    inline void ordenarMovimientoManual(float targetPosX, float targetPosY) { orderManualMovement(targetPosX, targetPosY); }
+    bool hasManualOrder() const { return m_hasManualOrder; }
+    inline bool tieneOrdenManual() const { return hasManualOrder(); }
+    float getTargetDestX() const { return m_targetDestX; }
+    float getTargetDestY() const { return m_targetDestY; }
+    inline float getDestinoX() const { return getTargetDestX(); }
+    inline float getDestinoY() const { return getTargetDestY(); }
+
+    TileRect getTileRect(const TileSet& tileSetRef) const;
+
+    void render(uint32_t* dstBuffer, int bufferWidth, int bufferHeight,
+                const IsometricCamera& cameraRef, const WorldMap& mapRef,
+                const TileSet& tileSetRef, ColorRGB auraColor, bool isSelected = false) const;
+    inline void renderizar(uint32_t* dstBuffer, int bufferWidth, int bufferHeight,
+                           const IsometricCamera& cameraRef, const WorldMap& mapRef,
+                           const TileSet& tileSetRef, ColorRGB auraColor, bool isSelected = false) const {
+        render(dstBuffer, bufferWidth, bufferHeight, cameraRef, mapRef, tileSetRef, auraColor, isSelected);
+    }
+
+    [[nodiscard]] float calculateReproductionDesire(const Humano& spouseRef, const WorldMap& mapRef,
+                                                    const BuildingSystem* buildingSystemRef) const;
+    inline float calcularDeseoReproduccion(const Humano& spouseRef, const WorldMap& mapRef,
+                                           const BuildingSystem* buildingSystemRef) const {
+        return calculateReproductionDesire(spouseRef, mapRef, buildingSystemRef);
+    }
 
 private:
     int m_id{1};
-    std::string m_nombre{"Grog"};
+    std::string m_name{"Grog"};
+    HumanGender m_gender{HumanGender::Male};
+
+    // Vínculo afectivo, conyugal y reproducción
+    int m_spouseId{-1};
+    float m_spouseAffection{0.0f};
+    bool m_isPregnant{false};
+    float m_pregnancyProgress{0.0f};
+    float m_fertilityCooldown{0.0f};
+
+    // Linaje, edad y crecimiento
+    float m_age{20.0f};
+    bool m_isChild{false};
+    int m_fatherId{-1};
+    int m_motherId{-1};
+    int m_childrenCount{0};
+
+    // Vivienda y necesidad de refugio
+    int m_homeId{-1};
+    float m_needForShelter{0.0f};
+    bool m_isBuildingHome{false};
+
+    // Estado biológico de descanso e instinto protector
+    bool m_isSleeping{false};
+    bool m_isSleepingIndoors{false};
+    float m_sleepNeed{10.0f};
+    float m_protectiveFuryTimer{0.0f};
+    int m_targetProtectedId{-1};
+    std::vector<int> m_childrenIds;
 
     float m_x{20.5f};
     float m_y{20.5f};
-    int m_celdaX{20};
-    int m_celdaY{20};
+    int m_cellX{20};
+    int m_cellY{20};
 
-    float m_destinoX{20.5f};
-    float m_destinoY{20.5f};
+    float m_targetDestX{20.5f};
+    float m_targetDestY{20.5f};
 
-    AccionHumano m_accion{AccionHumano::IDLE};
-    DireccionIso m_direccion{DireccionIso::SW};
+    HumanAction m_action{HumanAction::IDLE};
+    IsoDirection m_direction{IsoDirection::SW};
 
-    float m_velocidad{0.65f};
+    float m_speed{0.65f};
     int m_religionId{1};
-    float m_devocion{0.80f};
-    bool m_esChaman{false};
-    bool m_ordenManual{false};
-    float m_timerSenalDivina{0.0f};
-    float m_salud{100.0f};
-    float m_energia{100.0f};
-    float m_timerDano{0.0f};
-    float m_timerMuerte{0.0f};
+    float m_devotion{0.80f};
+    float m_leaderDevotion{0.50f};
+    int m_leaderId{-1};
+    bool m_isShaman{false};
+    bool m_hasManualOrder{false};
+    float m_divineSignTimer{0.0f};
+    float m_health{100.0f};
+    float m_energy{100.0f};
+    float m_damageTimer{0.0f};
+    float m_deathTimer{0.0f};
 
     float m_faithDeltaAccum{0.0f};
-    int m_faithIndicatorSign{0}; // +1: '+' verde (gana fe), -1: '+' rojo (pierde fe)
+    int m_faithIndicatorSign{0}; // +1: '+' verde, -1: '+' rojo
     float m_faithIndicatorTimer{0.0f};
 
-    float m_timerEstado{2.5f};
+    float m_stateTimer{2.5f};
     float m_animTimer{0.0f};
     RealisticPopGroup m_popGroup{};
     HumanUnit m_humanUnit{};
+    UnitMoralRecord m_moralRecord{};
+    ResourceType m_gatheringResourceType{ResourceType::None};
+    int m_carriedResourceAmount{0};
+    int m_carryingCapacity{10};
+    float m_spiritualHunger{20.0f};
+    bool m_isDeliveringOffering{false};
+    int m_targetEnemyId{-1};
+    float m_attackCooldown{0.0f};
 
-    void tomarDecisionIA(const WorldMap& mapa);
+    // Físicas de vuelo y estados de desastres naturales
+    float m_altitude{0.0f};
+    float m_velocityZ{0.0f};
+    float m_velocityX{0.0f};
+    float m_velocityY{0.0f};
+    bool m_flying{false};
+    float m_angularAngle{0.0f};
+
+    float m_panicTimer{0.0f};
+    float m_stumbleTimer{0.0f};
+    bool m_isInfected{false};
+    float m_infectionTimer{0.0f};
+    float m_coughTimer{0.0f};
+
+    AIDifficulty m_aiDifficulty{AIDifficulty::Equilibrada};
+    TribalBelligerence m_tribalBelligerence{TribalBelligerence::Equilibrada};
+
+    bool m_isDrowning{false};
+    bool m_isSwimming{false};
+    std::string m_causeOfDeath{""};
+    Ragdoll m_ragdoll;
 };
+
+using Human = Humano;
 
 class GestorHumanos {
 public:
     GestorHumanos();
 
-    void inicializarPoblacion(WorldMap& mapa, const ReligionRegistry& registry, int cantidad = 50);
-    void actualizar(float dt, WorldMap& mapa);
-    void renderizarTodos(uint32_t* dstBuffer, int dstW, int dstH,
-                         const IsometricCamera& camara, const WorldMap& mapa,
-                         const TileSet& tileset, const ReligionRegistry& registry) const;
+    // EN: Initialize world human population
+    // ES: Inicializar población humana de aldeanos sobre el mapa
+    void initializePopulation(WorldMap& mapRef, const ReligionRegistry& registryRef, int populationCount = 50);
+    inline void inicializarPoblacion(WorldMap& mapRef, const ReligionRegistry& registryRef, int populationCount = 50) {
+        initializePopulation(mapRef, registryRef, populationCount);
+    }
 
-    const std::vector<Humano>& getHumanos() const { return m_humanos; }
-    std::vector<Humano>& getHumanos() { return m_humanos; }
+    void update(float deltaTime, WorldMap& mapRef, EventLine* eventLine = nullptr, int currentYear = -4000,
+                ReligionRegistry* registry = nullptr, SoundSystem* soundSystem = nullptr,
+                const IsometricCamera* camera = nullptr,
+                NemesisSififusManager* nemesisSififus = nullptr,
+                ReligiousMoralitySystem* moralitySystem = nullptr,
+                const DayNightCycle* dayNight = nullptr,
+                const BuildingSystem* buildingSystem = nullptr);
+    inline void actualizar(float deltaTime, WorldMap& mapRef, EventLine* eventLine = nullptr, int currentYear = -4000,
+                           ReligionRegistry* registry = nullptr, SoundSystem* soundSystem = nullptr,
+                           const IsometricCamera* camera = nullptr,
+                           NemesisSififusManager* nemesisSififus = nullptr,
+                           ReligiousMoralitySystem* moralitySystem = nullptr,
+                           const DayNightCycle* dayNight = nullptr,
+                           const BuildingSystem* buildingSystem = nullptr) {
+        update(deltaTime, mapRef, eventLine, currentYear, registry, soundSystem, camera, nemesisSififus, moralitySystem, dayNight, buildingSystem);
+    }
 
-    void agregarHumano(const Humano& h);
-    const Humano* getHumanoSeleccionado() const;
-    Humano* getHumanoSeleccionadoMutable();
-    void seleccionarHumano(int id);
-    int buscarChamanDeReligion(int religionId) const;
-    void ejecutarSenalDivina(int tipoSenal, WorldMap& mapa, ReligionRegistry& registry,
-                             EventLine& eventLine, int currentYear);
-    int buscarHumanoCercano(float worldX, float worldY, float radioMax = 1.0f, int soloReligionId = -1) const;
-    int buscarHumanoEnPantalla(float screenX, float screenY, const IsometricCamera& camara,
-                               const WorldMap& mapa, int soloReligionId = -1) const;
+    void renderAll(uint32_t* dstBuffer, int bufferWidth, int bufferHeight,
+                   const IsometricCamera& cameraRef, const WorldMap& mapRef,
+                   const TileSet& tileSetRef, const ReligionRegistry& registryRef) const;
+    inline void renderizarTodos(uint32_t* dstBuffer, int bufferWidth, int bufferHeight,
+                                const IsometricCamera& cameraRef, const WorldMap& mapRef,
+                                const TileSet& tileSetRef, const ReligionRegistry& registryRef) const {
+        renderAll(dstBuffer, bufferWidth, bufferHeight, cameraRef, mapRef, tileSetRef, registryRef);
+    }
+
+    const std::vector<Humano>& getVillagers() const { return m_villagers; }
+    std::vector<Humano>& getVillagers() { return m_villagers; }
+    inline const std::vector<Humano>& getHumanos() const { return getVillagers(); }
+    inline std::vector<Humano>& getHumanos() { return getVillagers(); }
+
+    [[nodiscard]] int countLivingHumansOfReligion(int religionId) const {
+        int livingCount = 0;
+        for (const auto& villager : m_villagers) {
+            if (villager.getReligionId() == religionId && villager.isAlive()) {
+                ++livingCount;
+            }
+        }
+        return livingCount;
+    }
+    inline int contarHumanosVivosDeReligion(int religionId) const {
+        return countLivingHumansOfReligion(religionId);
+    }
+
+    [[nodiscard]] int countTotalHumansOfReligion(int religionId) const {
+        int totalCount = 0;
+        for (const auto& villager : m_villagers) {
+            if (villager.getReligionId() == religionId) {
+                ++totalCount;
+            }
+        }
+        return totalCount;
+    }
+    inline int contarHumanosTotalesDeReligion(int religionId) const {
+        return countTotalHumansOfReligion(religionId);
+    }
+
+    void addVillager(const Humano& villagerRef);
+    inline void agregarHumano(const Humano& villagerRef) { addVillager(villagerRef); }
+
+    const Humano* getSelectedVillager() const;
+    Humano* getSelectedVillagerMutable();
+    inline const Humano* getHumanoSeleccionado() const { return getSelectedVillager(); }
+    inline Humano* getHumanoSeleccionadoMutable() { return getSelectedVillagerMutable(); }
+
+    void selectVillager(int villagerId);
+    inline void seleccionarHumano(int villagerId) { selectVillager(villagerId); }
+
+    int findShamanOfReligion(int religionId) const;
+    inline int buscarChamanDeReligion(int religionId) const { return findShamanOfReligion(religionId); }
+
+    int findSpiritualLeaderOfReligion(int religionId) const;
+    inline int buscarLiderEspiritualDeReligion(int religionId) const { return findSpiritualLeaderOfReligion(religionId); }
+
+    void executeDivineSign(int signType, WorldMap& mapRef, ReligionRegistry& registryRef,
+                           EventLine& eventLineRef, int currentYear);
+    inline void ejecutarSenalDivina(int signType, WorldMap& mapRef, ReligionRegistry& registryRef,
+                                    EventLine& eventLineRef, int currentYear) {
+        executeDivineSign(signType, mapRef, registryRef, eventLineRef, currentYear);
+    }
+
+    int findNearbyVillager(float worldPosX, float worldPosY, float maxRadius = 1.0f, int onlyReligionId = -1) const;
+    inline int buscarHumanoCercano(float worldPosX, float worldPosY, float maxRadius = 1.0f, int onlyReligionId = -1) const {
+        return findNearbyVillager(worldPosX, worldPosY, maxRadius, onlyReligionId);
+    }
+
+    int findVillagerOnScreen(float screenPosX, float screenPosY, const IsometricCamera& cameraRef,
+                             const WorldMap& mapRef, int onlyReligionId = -1) const;
+    inline int buscarHumanoEnPantalla(float screenPosX, float screenPosY, const IsometricCamera& cameraRef,
+                                      const WorldMap& mapRef, int onlyReligionId = -1) const {
+        return findVillagerOnScreen(screenPosX, screenPosY, cameraRef, mapRef, onlyReligionId);
+    }
+
+    AIDifficulty getAIDifficulty() const { return m_aiDifficulty; }
+    void setAIDifficulty(AIDifficulty diff) {
+        m_aiDifficulty = diff;
+        for (auto& villager : m_villagers) villager.setAIDifficulty(diff);
+    }
+    TribalBelligerence getTribalBelligerence() const { return m_tribalBelligerence; }
+    void setTribalBelligerence(TribalBelligerence bel) {
+        m_tribalBelligerence = bel;
+        for (auto& villager : m_villagers) villager.setTribalBelligerence(bel);
+    }
 
 private:
-    std::vector<Humano> m_humanos;
-    int m_seleccionadoId{-1};
-    int m_siguienteId{1};
+    std::vector<Humano> m_villagers;
+    int m_selectedVillagerId{-1};
+    int m_nextVillagerId{1};
     FirstEraAIController m_firstEraAI{};
     HumanAIController m_humanAI{};
     float m_birthAccumulator{0.0f};
+    float m_survivalTimer{0.0f};
+    AIDifficulty m_aiDifficulty{AIDifficulty::Equilibrada};
+    TribalBelligerence m_tribalBelligerence{TribalBelligerence::Equilibrada};
 };
+
+using HumanManager = GestorHumanos;
 
 } // namespace ReligionSim

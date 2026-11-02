@@ -1,6 +1,7 @@
 #include "WorldMap.hpp"
 #include <cmath>
 #include <algorithm>
+#include <random>
 
 namespace ReligionSim {
 
@@ -153,15 +154,17 @@ WorldMap::WorldMap(int width, int height)
     }
 }
 
-Cell& WorldMap::getCell(int x, int y) {
-    return m_cells[y * m_width + x];
+Cell& WorldMap::getCell(int cellX, int cellY) {
+    return m_cells[cellY * m_width + cellX];
 }
 
-const Cell& WorldMap::getCell(int x, int y) const {
-    return m_cells[y * m_width + x];
+const Cell& WorldMap::getCell(int cellX, int cellY) const {
+    return m_cells[cellY * m_width + cellX];
 }
 
-std::vector<Point2i> WorldMap::getNeighbors(int x, int y, bool includeDiagonals) const {
+// EN: Retrieve cardinal or 8-way neighbors within map bounds
+// ES: Obtener vecinos cardinales o en 8 direcciones dentro de los límites del mapa
+std::vector<Point2i> WorldMap::getNeighbors(int cellX, int cellY, bool includeDiagonals) const {
     std::vector<Point2i> result;
     result.reserve(includeDiagonals ? 8 : 4);
 
@@ -169,10 +172,10 @@ std::vector<Point2i> WorldMap::getNeighbors(int x, int y, bool includeDiagonals)
     static const int DY4[] = {0, 0, 1, -1};
 
     for (int i = 0; i < 4; ++i) {
-        int nx = x + DX4[i];
-        int ny = y + DY4[i];
-        if (isValid(nx, ny)) {
-            result.push_back({nx, ny});
+        int neighborX = cellX + DX4[i];
+        int neighborY = cellY + DY4[i];
+        if (isValid(neighborX, neighborY)) {
+            result.push_back({neighborX, neighborY});
         }
     }
 
@@ -180,10 +183,10 @@ std::vector<Point2i> WorldMap::getNeighbors(int x, int y, bool includeDiagonals)
         static const int DX_DIAG[] = {1, 1, -1, -1};
         static const int DY_DIAG[] = {1, -1, 1, -1};
         for (int i = 0; i < 4; ++i) {
-            int nx = x + DX_DIAG[i];
-            int ny = y + DY_DIAG[i];
-            if (isValid(nx, ny)) {
-                result.push_back({nx, ny});
+            int neighborX = cellX + DX_DIAG[i];
+            int neighborY = cellY + DY_DIAG[i];
+            if (isValid(neighborX, neighborY)) {
+                result.push_back({neighborX, neighborY});
             }
         }
     }
@@ -218,17 +221,18 @@ float WorldMap::getTravelEase(const Cell& from, const Cell& to) const {
     return 1.0f;
 }
 
-void WorldMap::generateProceduralWorld(uint32_t seed) {
-    assignBiomesAndElevations(seed);
+void WorldMap::generateProceduralWorld(uint32_t seed, WorldClimate climate, ResourceAbundance abundance) {
+    assignBiomesAndElevations(seed, climate);
     assignPopulationsAndRivers();
+    assignNaturalResources(seed, abundance);
 }
 
-void WorldMap::assignBiomesAndElevations(uint32_t seed) {
+void WorldMap::assignBiomesAndElevations(uint32_t seed, WorldClimate climate) {
     std::vector<BiomeType> initialBiomes(static_cast<size_t>(m_width * m_height));
     for (int y = 0; y < m_height; ++y) {
         for (int x = 0; x < m_width; ++x) {
             Cell& cell = getCell(x, y);
-            cell.climate = MultiNoiseBiomeGenerator::sample(x, y, m_width, m_height, seed);
+            cell.climate = MultiNoiseBiomeGenerator::sample(x, y, m_width, m_height, seed, climate);
             initialBiomes[static_cast<size_t>(y * m_width + x)] =
                 mapBiomeID(cell.climate.primary_biome);
         }
@@ -313,6 +317,125 @@ void WorldMap::assignPopulationsAndRivers() {
     }
 }
 
+void WorldMap::assignNaturalResources(uint32_t seed, ResourceAbundance abundance) {
+    float mult = 1.0f;
+    if (abundance == ResourceAbundance::Escaso) mult = 0.55f;
+    else if (abundance == ResourceAbundance::Abundante) mult = 1.65f;
+
+    for (int y = 0; y < m_height; ++y) {
+        for (int x = 0; x < m_width; ++x) {
+            Cell& c = getCell(x, y);
+            uint32_t h = seed ^ (static_cast<uint32_t>(x) * 73856093u ^ static_cast<uint32_t>(y) * 19349663u);
+            h = (h ^ (h >> 13)) * 0x5bd1e995;
+            h ^= (h >> 15);
+
+            if (abundance == ResourceAbundance::Escaso && (h % 5 == 0) && c.biome != BiomeType::FertileValley) {
+                c.naturalResource = ResourceType::None;
+                c.resourceAmount = 0;
+                c.maxResourceAmount = 0;
+                continue;
+            }
+
+            switch (c.biome) {
+                case BiomeType::FertileValley:
+                    c.naturalResource = ResourceType::Food;
+                    c.resourceAmount = static_cast<int>((220 + static_cast<int>(h % 140)) * mult);
+                    c.maxResourceAmount = c.resourceAmount + static_cast<int>(120 * mult);
+                    break;
+                case BiomeType::CoastalPlains:
+                    c.naturalResource = ResourceType::Food;
+                    c.resourceAmount = static_cast<int>((160 + static_cast<int>(h % 110)) * mult);
+                    c.maxResourceAmount = c.resourceAmount + static_cast<int>(90 * mult);
+                    break;
+                case BiomeType::ShallowWater:
+                    c.naturalResource = ResourceType::Food;
+                    c.resourceAmount = static_cast<int>((130 + static_cast<int>(h % 90)) * mult);
+                    c.maxResourceAmount = c.resourceAmount + static_cast<int>(70 * mult);
+                    break;
+                case BiomeType::DenseForest:
+                    c.naturalResource = ResourceType::Wood;
+                    c.resourceAmount = static_cast<int>((280 + static_cast<int>(h % 180)) * mult);
+                    c.maxResourceAmount = c.resourceAmount + static_cast<int>(140 * mult);
+                    break;
+                case BiomeType::HighlandHills: {
+                    int roll = static_cast<int>(h % 100);
+                    if (roll < 45) {
+                        c.naturalResource = ResourceType::Stone;
+                        c.resourceAmount = static_cast<int>((220 + static_cast<int>(h % 130)) * mult);
+                        c.maxResourceAmount = c.resourceAmount + static_cast<int>(100 * mult);
+                    } else if (roll < 75) {
+                        c.naturalResource = ResourceType::Iron;
+                        c.resourceAmount = static_cast<int>((140 + static_cast<int>(h % 100)) * mult);
+                        c.maxResourceAmount = c.resourceAmount + static_cast<int>(80 * mult);
+                    } else {
+                        c.naturalResource = ResourceType::Gold;
+                        c.resourceAmount = static_cast<int>((70 + static_cast<int>(h % 80)) * mult);
+                        c.maxResourceAmount = c.resourceAmount + static_cast<int>(60 * mult);
+                    }
+                    break;
+                }
+                case BiomeType::RuggedMountains: {
+                    int roll = static_cast<int>(h % 100);
+                    if (roll < 40) {
+                        c.naturalResource = ResourceType::Stone;
+                        c.resourceAmount = static_cast<int>((320 + static_cast<int>(h % 180)) * mult);
+                        c.maxResourceAmount = c.resourceAmount + static_cast<int>(120 * mult);
+                    } else if (roll < 75) {
+                        c.naturalResource = ResourceType::Iron;
+                        c.resourceAmount = static_cast<int>((180 + static_cast<int>(h % 120)) * mult);
+                        c.maxResourceAmount = c.resourceAmount + static_cast<int>(100 * mult);
+                    } else {
+                        c.naturalResource = ResourceType::Gold;
+                        c.resourceAmount = static_cast<int>((110 + static_cast<int>(h % 140)) * mult);
+                        c.maxResourceAmount = c.resourceAmount + static_cast<int>(90 * mult);
+                    }
+                    break;
+                }
+                case BiomeType::AridDesert:
+                    c.naturalResource = ResourceType::Stone;
+                    c.resourceAmount = static_cast<int>((90 + static_cast<int>(h % 60)) * mult);
+                    c.maxResourceAmount = c.resourceAmount + static_cast<int>(50 * mult);
+                    break;
+                case BiomeType::FrozenTundra:
+                    if ((h % 2) == 0) {
+                        c.naturalResource = ResourceType::Food;
+                        c.resourceAmount = static_cast<int>((90 + static_cast<int>(h % 50)) * mult);
+                        c.maxResourceAmount = c.resourceAmount + static_cast<int>(40 * mult);
+                    } else {
+                        c.naturalResource = ResourceType::Stone;
+                        c.resourceAmount = static_cast<int>((80 + static_cast<int>(h % 50)) * mult);
+                        c.maxResourceAmount = c.resourceAmount + static_cast<int>(40 * mult);
+                    }
+                    break;
+                case BiomeType::DeepOcean:
+                default:
+                    c.naturalResource = ResourceType::None;
+                    c.resourceAmount = 0;
+                    c.maxResourceAmount = 0;
+                    break;
+            }
+        }
+    }
+}
+
+// EN: Regenerate natural resources periodically up to their cell capacity
+// ES: Regenerar recursos naturales periódicamente hasta la capacidad de la celda
+void WorldMap::updateResources(float deltaTime) {
+    if (deltaTime <= 0.0f) return;
+    for (int cellY = 0; cellY < m_height; ++cellY) {
+        for (int cellX = 0; cellX < m_width; ++cellX) {
+            Cell& currentCell = getCell(cellX, cellY);
+            if (currentCell.naturalResource != ResourceType::None && currentCell.resourceAmount < currentCell.maxResourceAmount) {
+                currentCell.resourceRegenTimer += deltaTime;
+                if (currentCell.resourceRegenTimer >= 10.0f) {
+                    currentCell.resourceRegenTimer = 0.0f;
+                    currentCell.resourceAmount = std::min(currentCell.maxResourceAmount, currentCell.resourceAmount + 1);
+                }
+            }
+        }
+    }
+}
+
 void WorldMap::seedPrimordialFaiths(ReligionRegistry& registry, int currentYear) {
     // Hearth 1: Solar Atenism (East / Fertile River delta)
     int rel1 = registry.createPrimordialReligion(
@@ -344,19 +467,10 @@ void WorldMap::seedPrimordialFaiths(ReligionRegistry& registry, int currentYear)
         ColorRGB(155, 89, 182), "Wheel", currentYear
     );
 
-    // Find good habitable locations for each hearth
-    std::vector<Point2i> fertileLocations;
-    for (int y = 5; y < m_height - 5; ++y) {
-        for (int x = 5; x < m_width - 5; ++x) {
-            const Cell& c = getCell(x, y);
-            if (c.biome == BiomeType::FertileValley || c.biome == BiomeType::CoastalPlains) {
-                fertileLocations.push_back({x, y});
-            }
-        }
-    }
+    // Ubicar pueblos fundacionales con separación mínima garantizada
+    std::vector<Point2i> puebloLocations = generatePuebloLocations(5, 42);
 
-    if (fertileLocations.size() >= 5) {
-        int step = static_cast<int>(fertileLocations.size()) / 5;
+    if (puebloLocations.size() >= 5) {
         int faiths[] = {rel1, rel2, rel3, rel4, rel5};
         const char* holyNames[] = {
             "Sun Spire of Heliopolis",
@@ -367,20 +481,26 @@ void WorldMap::seedPrimordialFaiths(ReligionRegistry& registry, int currentYear)
         };
 
         for (int i = 0; i < 5; ++i) {
-            Point2i pt = fertileLocations[i * step];
+            Point2i pt = puebloLocations[i];
             Cell& c = getCell(pt.x, pt.y);
             c.setShare(faiths[i], 0.95f);
             c.devotion = 0.90f;
             consecrateHolySite(pt.x, pt.y, holyNames[i]);
             c.shrineLevel = 2; // Established Temple
 
-            // Also seed immediate neighbors with moderate faith
-            auto neighbors = getNeighbors(pt.x, pt.y, true);
-            for (const auto& nb : neighbors) {
-                Cell& nbc = getCell(nb.x, nb.y);
-                if (nbc.isHabitable()) {
-                    nbc.setShare(faiths[i], 0.65f);
-                    nbc.devotion = 0.70f;
+            // Sembrar la comarca territorial del pueblo (radio 2)
+            for (int dy = -2; dy <= 2; ++dy) {
+                for (int dx = -2; dx <= 2; ++dx) {
+                    int nx = pt.x + dx;
+                    int ny = pt.y + dy;
+                    float d = std::sqrt(static_cast<float>(dx * dx + dy * dy));
+                    if (isValid(nx, ny) && d <= 2.5f && (dx != 0 || dy != 0)) {
+                        Cell& nbc = getCell(nx, ny);
+                        if (nbc.isHabitable()) {
+                            nbc.setShare(faiths[i], std::max(0.60f, 0.90f - d * 0.12f));
+                            nbc.devotion = std::max(0.55f, 0.85f - d * 0.12f);
+                        }
+                    }
                 }
             }
         }
@@ -389,15 +509,187 @@ void WorldMap::seedPrimordialFaiths(ReligionRegistry& registry, int currentYear)
     recalculateReligions(registry);
 }
 
-void WorldMap::consecrateHolySite(int x, int y, const std::string& name) {
-    if (!isValid(x, y)) return;
-    Cell& c = getCell(x, y);
-    int targetRel = (c.dominantReligionId > 0) ? c.dominantReligionId : ((c.holySiteReligionId > 0) ? c.holySiteReligionId : 1);
+std::vector<Point2i> WorldMap::generatePuebloLocations(int count, uint32_t seed) const {
+    std::vector<Point2i> result;
+    if (count <= 0) return result;
 
-    // Garantizar que cada religión tenga como máximo una sola celda de Templo principal
+    const int margin = std::clamp(static_cast<int>(std::min(m_width, m_height) * 0.08f), 3, 5);
+
+    // 1. Recolectar celdas candidatas viables para asentamientos humanos
+    struct Candidate {
+        Point2i pt;
+        int habitableNeighbors;
+        int qualityScore;
+    };
+    std::vector<Candidate> candidates;
+    candidates.reserve(m_width * m_height / 4);
+
+    for (int y = margin; y < m_height - margin; ++y) {
+        for (int x = margin; x < m_width - margin; ++x) {
+            const Cell& c = getCell(x, y);
+            if (!c.isHabitable()) continue;
+
+            // Evaluar vecindario 5x5 (radio 2) para asegurar masa de tierra sólida y segura
+            int habCount = 0;
+            int resourceBonus = 0;
+            for (int dy = -2; dy <= 2; ++dy) {
+                for (int dx = -2; dx <= 2; ++dx) {
+                    int nx = x + dx;
+                    int ny = y + dy;
+                    if (isValid(nx, ny) && getCell(nx, ny).isHabitable()) {
+                        habCount++;
+                        if (getCell(nx, ny).naturalResource != ResourceType::None) {
+                            resourceBonus += 2;
+                        }
+                    }
+                }
+            }
+
+            // Exigir al menos 13 celdas habitables de las 25 posibles en su entorno
+            if (habCount >= 13) {
+                int score = habCount + resourceBonus;
+                if (c.biome == BiomeType::FertileValley) score += 15;
+                else if (c.biome == BiomeType::CoastalPlains) score += 10;
+                else if (c.biome == BiomeType::DenseForest) score += 8;
+                else if (c.biome == BiomeType::HighlandHills) score += 5;
+
+                candidates.push_back({Point2i{x, y}, habCount, score});
+            }
+        }
+    }
+
+    // Fallback si el mapa es extremadamente agreste o archipiélago angosto
+    if (static_cast<int>(candidates.size()) < count * 2) {
+        for (int y = 2; y < m_height - 2; ++y) {
+            for (int x = 2; x < m_width - 2; ++x) {
+                const Cell& c = getCell(x, y);
+                if (c.isHabitable()) {
+                    candidates.push_back({Point2i{x, y}, 8, 10});
+                }
+            }
+        }
+    }
+
+    if (candidates.empty()) {
+        result.push_back({m_width / 2, m_height / 2});
+        return result;
+    }
+
+    // PRNG reproducible basado en la semilla del mundo
+    std::mt19937 rng(seed ^ 0x9E3779B9u);
+    std::shuffle(candidates.begin(), candidates.end(), rng);
+
+    // Distancia euclídea al cuadrado
+    auto distSq = [](const Point2i& a, const Point2i& b) {
+        float dx = static_cast<float>(a.x - b.x);
+        float dy = static_cast<float>(a.y - b.y);
+        return dx * dx + dy * dy;
+    };
+
+    // Calcular distancia mínima objetivo y cota inferior segura
+    float targetMinDist = std::min(m_width, m_height) * 0.38f;
+    float minDistFloor = std::max(8.0f, std::min(m_width, m_height) * 0.22f);
+    float currentMinDist = targetMinDist;
+
+    bool success = false;
+    while (currentMinDist >= minDistFloor && !success) {
+        float reqSq = currentMinDist * currentMinDist;
+
+        // Intentar varias semillas de muestreo para maximizar el confort del mapa
+        for (int attempt = 0; attempt < 60; ++attempt) {
+            std::vector<Point2i> chosen;
+
+            // Escoger el primer pueblo (Hogar del Jugador): preferir un candidato con alto score cerca de la zona central/balanceada
+            std::vector<Point2i> poolFirst;
+            for (const auto& cand : candidates) {
+                float distFromCenter = std::sqrt(distSq(cand.pt, {m_width / 2, m_height / 2}));
+                if (distFromCenter <= m_width * 0.35f && cand.qualityScore >= 16) {
+                    poolFirst.push_back(cand.pt);
+                }
+            }
+            if (poolFirst.empty()) {
+                poolFirst.push_back(candidates[0].pt);
+            }
+            std::uniform_int_distribution<size_t> firstDist(0, poolFirst.size() - 1);
+            chosen.push_back(poolFirst[firstDist(rng)]);
+
+            // Escoger los siguientes pueblos maximizando la distancia a todos los ya elegidos
+            for (int p = 1; p < count; ++p) {
+                float bestMinDistToChosen = -1.0f;
+                Point2i bestCandidate{-1, -1};
+
+                for (const auto& cand : candidates) {
+                    float closestSq = 1e9f;
+                    for (const auto& ch : chosen) {
+                        float d = distSq(cand.pt, ch);
+                        if (d < closestSq) closestSq = d;
+                    }
+
+                    if (closestSq >= reqSq) {
+                        // Cumple la distancia mínima; ponderar por distancia mínima y calidad
+                        float weight = closestSq + static_cast<float>(cand.qualityScore) * 6.0f;
+                        if (weight > bestMinDistToChosen) {
+                            bestMinDistToChosen = weight;
+                            bestCandidate = cand.pt;
+                        }
+                    }
+                }
+
+                if (bestCandidate.x != -1) {
+                    chosen.push_back(bestCandidate);
+                } else {
+                    break; // No cupo otro pueblo con esta distancia
+                }
+            }
+
+            if (static_cast<int>(chosen.size()) == count) {
+                result = std::move(chosen);
+                success = true;
+                break;
+            }
+        }
+
+        if (!success) {
+            currentMinDist -= 1.0f; // Relajar levemente
+        }
+    }
+
+    // Si aún faltasen (mapas extremos), rellenar con los candidatos más lejanos disponibles
+    while (static_cast<int>(result.size()) < count && !candidates.empty()) {
+        float maxMinDist = -1.0f;
+        Point2i bestCand = candidates[0].pt;
+        for (const auto& cand : candidates) {
+            float minDist = 1e9f;
+            for (const auto& ch : result) {
+                float d = distSq(cand.pt, ch);
+                if (d < minDist) minDist = d;
+            }
+            if (minDist > maxMinDist) {
+                maxMinDist = minDist;
+                bestCand = cand.pt;
+            }
+        }
+        result.push_back(bestCand);
+    }
+
+    return result;
+}
+
+// EN: Consecrate a cell as a designated holy site and assign its patron religion
+// ES: Consagrar una celda como sitio sagrado y asignar su religión patrona
+void WorldMap::consecrateHolySite(int cellX, int cellY, const std::string& name, int religionId) {
+    if (!isValid(cellX, cellY)) return;
+    Cell& targetCell = getCell(cellX, cellY);
+    int targetRel = (religionId > 0) ? religionId : ((targetCell.dominantReligionId > 0) ? targetCell.dominantReligionId : ((targetCell.holySiteReligionId > 0) ? targetCell.holySiteReligionId : 1));
+    if (religionId > 0) {
+        targetCell.setShare(targetRel, std::max(targetCell.getShare(targetRel), 0.90f));
+    }
+
+    // EN: Ensure each religion has at most one main temple site
+    // ES: Garantizar que cada religión tenga como máximo una sola celda de Templo principal
     for (auto& existing : m_cells) {
         if (existing.hasHolySite && existing.holySiteReligionId == targetRel &&
-            (existing.x != x || existing.y != y)) {
+            (existing.x != cellX || existing.y != cellY)) {
             existing.hasHolySite = false;
             existing.shrineLevel = 0;
             existing.holySiteReligionId = 0;
@@ -405,19 +697,21 @@ void WorldMap::consecrateHolySite(int x, int y, const std::string& name) {
         }
     }
 
-    c.hasHolySite = true;
-    c.shrineLevel = std::max(c.shrineLevel, 1);
-    c.holySiteReligionId = targetRel;
-    c.holySiteName = name;
-    c.devotion = std::min(1.0f, c.devotion + 0.25f);
+    targetCell.hasHolySite = true;
+    targetCell.shrineLevel = std::max(targetCell.shrineLevel, 1);
+    targetCell.holySiteReligionId = targetRel;
+    targetCell.holySiteName = name;
+    targetCell.devotion = std::min(1.0f, targetCell.devotion + 0.25f);
 }
 
-void WorldMap::upgradeHolySite(int x, int y) {
-    if (!isValid(x, y)) return;
-    Cell& c = getCell(x, y);
-    if (c.hasHolySite) {
-        c.shrineLevel = std::min(4, c.shrineLevel + 1);
-        c.devotion = std::min(1.0f, c.devotion + 0.15f);
+// EN: Upgrade temple structure tiers (Shrine -> Temple -> Grand Sanctuary -> Wonder)
+// ES: Mejorar el nivel estructural del templo (Santuario -> Templo -> Gran Santuario -> Maravilla)
+void WorldMap::upgradeHolySite(int cellX, int cellY) {
+    if (!isValid(cellX, cellY)) return;
+    Cell& targetCell = getCell(cellX, cellY);
+    if (targetCell.hasHolySite) {
+        targetCell.shrineLevel = std::min(4, targetCell.shrineLevel + 1);
+        targetCell.devotion = std::min(1.0f, targetCell.devotion + 0.15f);
     }
 }
 

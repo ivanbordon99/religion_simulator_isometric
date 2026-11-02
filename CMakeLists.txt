@@ -24,6 +24,7 @@ set(COMMON_SOURCES
     src/Renderer.cpp
     src/UISystem.cpp
     src/SaveSystem.cpp
+    src/ErrorSystem.cpp
     src/Game.cpp
 )
 

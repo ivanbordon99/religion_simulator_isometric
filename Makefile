@@ -8,7 +8,7 @@ ifeq ($(OS),Windows_NT)
 else
     TARGET = $(BIN_DIR)/religion_sim
     TEST_TARGET = $(BIN_DIR)/test_simulation
-    LDFLAGS = -lX11 -lGL -lpthread
+    LDFLAGS = -lX11 -lGL -lpthread -ldl
 endif
 
 SRC_DIR = src
@@ -34,6 +34,16 @@ SRCS = $(SRC_DIR)/IsometricCamera.cpp \
        $(SRC_DIR)/Renderer.cpp \
        $(SRC_DIR)/UISystem.cpp \
        $(SRC_DIR)/SaveSystem.cpp \
+       $(SRC_DIR)/DivinePowersSystem.cpp \
+       $(SRC_DIR)/RagdollSystem.cpp \
+       $(SRC_DIR)/EraEvolutionEngine.cpp \
+       $(SRC_DIR)/DayNightCycle.cpp \
+       $(SRC_DIR)/CloudSystem.cpp \
+       $(SRC_DIR)/SoundSystem.cpp \
+       $(SRC_DIR)/NemesisSififus.cpp \
+       $(SRC_DIR)/ReligiousMoralitySystem.cpp \
+       $(SRC_DIR)/BuildingSystem.cpp \
+       $(SRC_DIR)/ErrorSystem.cpp \
        $(SRC_DIR)/Game.cpp
 
 OBJS = $(patsubst $(SRC_DIR)/%.cpp, $(BUILD_DIR)/%.o, $(SRCS))

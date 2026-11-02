@@ -137,9 +137,16 @@ Game::Game(int windowWidth, int windowHeight)
     m_fog.reset(m_map.getWidth(), m_map.getHeight());
     m_fog.setPlayerReligionId(PLAYER_RELIGION_ID);
     m_renderer.setFogOfWar(&m_fog);
+    m_renderer.setDayNightCycle(&m_dayNightCycle);
+    m_renderer.setCloudSystem(&m_cloudSystem);
+    m_renderer.setNemesisSififus(&m_nemesisSififus);
+    m_renderer.setMoralitySystem(&m_moralitySystem);
+    m_renderer.setBuildingSystem(&m_buildingSystem);
 }
 
-Game::~Game() {}
+Game::~Game() {
+    m_soundSystem.shutdown();
+}
 
 bool Game::init() {
 #ifdef HAS_WIN32
@@ -148,8 +155,11 @@ bool Game::init() {
     // Generar una semilla aleatoria por defecto para el primer arranque en la ventana de creación
     m_creationConfig.mapSeed = static_cast<uint32_t>(std::time(nullptr)) ^ 0xA5A5A5A5;
 
+    // Inicializar sistema de sonido y música de la placa de sonido
+    m_soundSystem.init();
+
     // Try initializing window (X11 / Win32 / OpenGL)
-    bool windowOk = m_renderer.initWindow("Marangatu: The Faith Simulator");
+    bool windowOk = m_renderer.initWindow("Marangatu: The Faith Simulator [Pre-Alpha v0.4.0]");
     if (windowOk) {
 #if HAS_X11
         std::cout << "[Simulator] X11/OpenGL Display initialized successfully." << std::endl;
@@ -166,7 +176,10 @@ bool Game::init() {
 }
 
 void Game::update(float deltaTime) {
+    m_renderer.update(deltaTime);
+
     if (m_gameState != GameState::Playing) {
+        m_soundSystem.setSimulationTimeState(true, 0.0f, m_timeline.getCurrentYear());
         return; // No avanzar la simulación en menús
     }
 
@@ -187,8 +200,18 @@ void Game::update(float deltaTime) {
     m_timeline.update(deltaTime, dtYears);
     m_timeEngine.setYear(static_cast<double>(m_timeline.getCurrentYear()));
 
-    float speedMult = m_timeline.isPaused() ? 0.0f : static_cast<float>(m_timeline.getSpeedMultiplier());
+    bool isPaused = m_timeline.isPaused();
+    float speedMult = isPaused ? 0.0f : static_cast<float>(m_timeline.getSpeedMultiplier());
+    int currentYear = m_timeline.getCurrentYear();
     float spriteDt = deltaTime * speedMult;
+
+    // Actualizar paisaje sonoro ambiental y música adaptativa sincronizados exactamente con el tiempo de la simulación
+    m_soundSystem.update(deltaTime, m_map, m_camera, &m_dayNightCycle, &m_divinePowers, m_gestorHumanos, isPaused, speedMult, currentYear);
+
+    m_dayNightCycle.setPaused(isPaused);
+    m_dayNightCycle.update(spriteDt);
+    float cloudDt = isPaused ? (deltaTime * 0.35f) : (spriteDt + deltaTime * 0.20f);
+    m_cloudSystem.update(cloudDt);
 
     // Actualizar objetos Humano con IA y animación sobre el tileset (sincroniza población y fe 1:1 en celdas)
     if (spriteDt <= 0.0f && m_cheatSelectorActive) {
@@ -204,7 +227,20 @@ void Game::update(float deltaTime) {
             m_map.recalculateReligions(m_registry);
         }
     } else {
-        m_gestorHumanos.actualizar(spriteDt, m_map);
+        m_gestorHumanos.actualizar(spriteDt, m_map, &m_eventLine, m_timeline.getCurrentYear(),
+                                   &m_registry, &m_soundSystem, &m_camera, &m_nemesisSififus,
+                                   &m_moralitySystem, &m_dayNightCycle, &m_buildingSystem);
+    }
+
+    // Actualización del Sistema Némesis y Motor Sísifo (propagación de mitos y modulación de fieles)
+    m_nemesisSififus.update(dtYears > 0.0f ? dtYears : (spriteDt * 0.02f), currentYear, m_gestorHumanos, m_map, &m_registry, &m_eventLine);
+
+    // Actualización del Sistema de Moral Religiosa y Reglas (Gracia comunitaria y mandatos)
+    m_moralitySystem.update(dtYears > 0.0f ? dtYears : (spriteDt * 0.02f), currentYear, m_gestorHumanos, m_map, m_registry, &m_eventLine);
+
+    // Actualización del Sistema de Construcción de Casas por Necesidad
+    if (spriteDt > 0.0f) {
+        m_buildingSystem.update(spriteDt, m_map, m_gestorHumanos, &m_eventLine, currentYear, &m_soundSystem, &m_camera, &m_moralitySystem);
     }
 
     if (spriteDt > 0.0f && dtYears <= 0.0f) {
@@ -215,7 +251,11 @@ void Game::update(float deltaTime) {
         std::vector<GameEvent> newEvents;
 
         // 1. Advance eras & theological doctrines
+        size_t prevEvCount = newEvents.size();
         m_advancement.updateAdvancements(m_registry, m_timeline.getCurrentYear(), newEvents);
+        if (newEvents.size() > prevEvCount) {
+            m_soundSystem.playSFX(SFXType::EraAscension, 0.95f);
+        }
 
         // 2. Replication (spatial diffusion, demographic growth, missionary caravans)
         m_replication.update(m_map, m_registry, dtYears, newEvents, m_timeline.getCurrentYear());
@@ -251,27 +291,83 @@ void Game::update(float deltaTime) {
                       << ev.title << " - " << ev.description << std::endl;
         }
 
-        // 6. Record history snapshots for timeline scrubbing
-        int w = m_map.getWidth();
-        int h = m_map.getHeight();
-        std::vector<uint8_t> domMap(w * h, 0);
-        for (int y = 0; y < h; ++y) {
-            for (int x = 0; x < w; ++x) {
-                domMap[y * w + x] = static_cast<uint8_t>(m_map.getCell(x, y).dominantReligionId);
+        // EN: 6. Record history snapshots for timeline scrubbing
+        // ES: 6. Registrar instantáneas históricas para el desplazamiento temporal
+        const int mapWidth = m_map.getWidth();
+        const int mapHeight = m_map.getHeight();
+        std::vector<uint8_t> dominanceMap(mapWidth * mapHeight, 0);
+        for (int cellY = 0; cellY < mapHeight; ++cellY) {
+            for (int cellX = 0; cellX < mapWidth; ++cellX) {
+                dominanceMap[cellY * mapWidth + cellX] = static_cast<uint8_t>(m_map.getCell(cellX, cellY).dominantReligionId);
             }
         }
 
-        std::vector<std::pair<int, int>> followers;
-        for (const auto& r : m_registry.getAllReligions()) {
-            followers.push_back({r.id, r.totalFollowers});
+        std::vector<std::pair<int, int>> religionFollowers;
+        for (const auto& religionItem : m_registry.getAllReligions()) {
+            religionFollowers.push_back({religionItem.id, religionItem.totalFollowers});
         }
-        m_timeline.recordSnapshot(m_map.getTotalWorldPopulation(), domMap, followers);
+        m_timeline.recordSnapshot(m_map.getTotalWorldPopulation(), dominanceMap, religionFollowers);
     }
 
+    for (const auto& fx : m_divinePowers.getActiveFX()) {
+        if (fx.type == DivinePowerType::Meteor && !fx.impactTriggered && (fx.timer + deltaTime >= 1.25f)) {
+            m_camera.addScreenShake(20.0f, 4.0f);
+            m_dayNightCycle.triggerLightningFlash(1.2f);
+        } else if (fx.type == DivinePowerType::Volcano) {
+            if (std::fmod(fx.timer, 2.5f) < deltaTime) {
+                m_camera.addScreenShake(3.5f, 1.0f);
+            }
+        } else if (fx.type == DivinePowerType::Wildfire) {
+            if (std::fmod(fx.timer, 3.0f) < deltaTime) {
+                m_camera.addScreenShake(1.5f, 0.5f);
+            }
+        }
+    }
+
+    m_divinePowers.update(deltaTime, m_map, m_gestorHumanos);
     refreshFaithFog();
+
+    // 7. Verificación de Condición de Derrota: Extinción Total de la Fe
+    // "recuerda que pierdes la partida cuando todas tus unidades mueren, porque ya no pueden replicar tu fe"
+    if (m_gameOverTriggered) {
+        m_gameOverTimer -= deltaTime;
+        if (m_gameOverTimer <= 0.0f) {
+            m_gameState = GameState::GameOver;
+        }
+    } else {
+        int playerRel = resolvePlayerReligionId();
+        int livingBelievers = m_gestorHumanos.contarHumanosVivosDeReligion(playerRel);
+        int totalBelievers = m_gestorHumanos.contarHumanosTotalesDeReligion(playerRel);
+
+        if (totalBelievers > 0 && livingBelievers == 0) {
+            m_gameOverTriggered = true;
+            m_gameOverTimer = 1.8f; // Pausa dramática fúnebre de 1.8 segundos antes de mostrar el epitafio
+            m_extinctionYear = currentYear;
+            m_soundSystem.playSFX(SFXType::UnitDeath, 1.0f);
+
+            GameEvent extEv;
+            extEv.year = currentYear;
+            extEv.title = "EXTINCION TOTAL DE LA FE";
+            extEv.description = "Todos tus fieles han muerto. Sin almas vivas para orar y replicar tu dogma, tu divinidad se extingue para siempre.";
+            extEv.category = EventCategory::Extinction;
+            extEv.location = m_selectedCell;
+            extEv.religionAId = playerRel;
+            extEv.badgeColor = {200, 30, 40};
+            extEv.isTurningPoint = true;
+            m_eventLine.addEvent(extEv);
+
+            std::cout << "[GameOver] " << extEv.title << " en " << Timeline::formatYear(currentYear)
+                      << " - Todos los fieles han muerto." << std::endl;
+        }
+    }
 }
 
 void Game::render() {
+    if (m_gameState == GameState::Playing) {
+        m_renderer.setDayNightCycle(&m_dayNightCycle);
+    } else {
+        m_renderer.setDayNightCycle(nullptr);
+    }
     m_renderer.beginFrame();
 
     if (m_gameState == GameState::MainMenu) {
@@ -282,14 +378,28 @@ void Game::render() {
         m_renderer.renderLoadWorldMenu(m_hoveredMenuButtonId, m_selectedSaveIndex);
     } else if (m_gameState == GameState::Options) {
         m_renderer.renderOptionsMenu(m_hoveredMenuButtonId);
-    } else {
+    } else if (m_gameState == GameState::GameOver) {
         m_renderer.setFogOfWar(&m_fog);
+        int hoverGx = -1, hoverGy = -1;
+        m_camera.screenToGrid(m_mouseX, m_mouseY, hoverGx, hoverGy);
         m_renderer.render(m_map, m_registry, m_timeline, m_eventLine,
                           m_replication, m_gestorHumanos, m_camera, m_selectedCell, m_mapMode,
-                          m_creationConfig);
+                          m_creationConfig, &m_advancement, &m_divinePowers, {hoverGx, hoverGy},
+                          &m_dayNightCycle, &m_cloudSystem);
+        const Religion* pRel = m_registry.getReligion(resolvePlayerReligionId());
+        int eraIdx = pRel ? static_cast<int>(pRel->currentEra) : 0;
+        m_renderer.renderGameOver(m_creationConfig, m_extinctionYear, eraIdx, m_hoveredMenuButtonId);
+    } else {
+        m_renderer.setFogOfWar(&m_fog);
+        int hoverGx = -1, hoverGy = -1;
+        m_camera.screenToGrid(m_mouseX, m_mouseY, hoverGx, hoverGy);
+        m_renderer.render(m_map, m_registry, m_timeline, m_eventLine,
+                          m_replication, m_gestorHumanos, m_camera, m_selectedCell, m_mapMode,
+                          m_creationConfig, &m_advancement, &m_divinePowers, {hoverGx, hoverGy},
+                          &m_dayNightCycle, &m_cloudSystem);
         m_renderer.renderCommandConsole(m_commandBoxOpen, m_commandInput,
-                                        m_cheatSelectorActive, m_commandFeedback,
-                                        m_cheatLuminusActive);
+                          m_cheatSelectorActive, m_commandFeedback,
+                          m_cheatLuminusActive);
     }
 
     m_renderer.drawCursor(static_cast<int>(m_mouseX), static_cast<int>(m_mouseY));
@@ -307,9 +417,88 @@ void Game::onWindowResize(int newWidth, int newHeight) {
     m_camera.setScreenSize(newWidth, newHeight);
 }
 
-void Game::selectCell(int gx, int gy) {
-    if (m_map.isValid(gx, gy)) {
-        m_selectedCell = {gx, gy};
+void Game::selectCell(int gridCellX, int gridCellY) {
+    if (m_map.isValid(gridCellX, gridCellY)) {
+        m_selectedCell = {gridCellX, gridCellY};
+    }
+}
+
+void Game::castDivinePower(DivinePowerType divineType, int targetGridX, int targetGridY) {
+    const int playerRel = resolvePlayerReligionId();
+    const CastResult castResult = m_divinePowers.castPower(divineType, targetGridX, targetGridY, m_map, m_registry,
+                                                           m_gestorHumanos, m_timeline.getCurrentYear(),
+                                                           m_eventLine, playerRel);
+    if (castResult.success) {
+        showFeedback(castResult.message, 5.0f);
+        if (divineType == DivinePowerType::Lightning) {
+            m_dayNightCycle.triggerLightningFlash(0.35f);
+            m_soundSystem.playSpatialSFX(SFXType::ThunderStrike, targetGridX, targetGridY, m_camera, 1.25f);
+        } else if (divineType == DivinePowerType::Earthquake) {
+            m_camera.addScreenShake(9.0f, 5.0f);
+            m_soundSystem.playSpatialSFX(SFXType::Earthquake, targetGridX, targetGridY, m_camera, 1.15f);
+        } else if (divineType == DivinePowerType::Tornado) {
+            m_camera.addScreenShake(3.5f, 2.5f);
+            m_soundSystem.playSpatialSFX(SFXType::TornadoWhoosh, targetGridX, targetGridY, m_camera, 1.05f);
+        } else if (divineType == DivinePowerType::Meteor) {
+            m_camera.addScreenShake(5.0f, 1.25f);
+            m_soundSystem.playSpatialSFX(SFXType::MeteorImpact, targetGridX, targetGridY, m_camera, 1.40f);
+        } else if (divineType == DivinePowerType::Volcano) {
+            m_camera.addScreenShake(10.0f, 4.0f);
+            m_dayNightCycle.triggerLightningFlash(0.6f);
+            m_soundSystem.playSpatialSFX(SFXType::MeteorImpact, targetGridX, targetGridY, m_camera, 1.30f);
+        } else if (divineType == DivinePowerType::Wildfire) {
+            m_camera.addScreenShake(4.0f, 2.0f);
+            m_dayNightCycle.triggerLightningFlash(0.4f);
+            m_soundSystem.playSpatialSFX(SFXType::MeteorImpact, targetGridX, targetGridY, m_camera, 0.95f);
+        } else if (divineType == DivinePowerType::Plague) {
+            m_soundSystem.playSpatialSFX(SFXType::PlagueSwarm, targetGridX, targetGridY, m_camera, 1.0f);
+        } else if (divineType == DivinePowerType::Miracle) {
+            m_soundSystem.playSpatialSFX(SFXType::FaithGain, targetGridX, targetGridY, m_camera, 1.1f);
+        } else if (divineType == DivinePowerType::Congregate) {
+            m_soundSystem.playSpatialSFX(SFXType::PrayerChant, targetGridX, targetGridY, m_camera, 1.0f);
+        }
+
+        // EN: Mythogenesis and recording survivors in Nemesis & Sisyphus system
+        // ES: Mitogénesis y Registro de Sobrevivientes en el Sistema Némesis & Sísifo
+        for (auto& livingVillager : m_gestorHumanos.getHumanos()) {
+            if (!livingVillager.estaVivo()) continue;
+            const float deltaWorldX = livingVillager.getX() - static_cast<float>(targetGridX);
+            const float deltaWorldY = livingVillager.getY() - static_cast<float>(targetGridY);
+            if (std::hypot(deltaWorldX, deltaWorldY) <= 4.8f) {
+                if (divineType == DivinePowerType::Miracle) {
+                    m_nemesisSififus.onUnitSparedOrBlessed(livingVillager, m_timeline.getCurrentYear(), &m_eventLine, &m_registry);
+                } else if (divineType == DivinePowerType::Lightning || divineType == DivinePowerType::Meteor ||
+                           divineType == DivinePowerType::Earthquake || divineType == DivinePowerType::Volcano ||
+                           divineType == DivinePowerType::Wildfire) {
+                    m_nemesisSififus.onUnitHitByDivinePower(livingVillager, 35.0f, m_timeline.getCurrentYear(), &m_eventLine, &m_registry);
+                }
+            }
+        }
+        if (m_map.isValid(targetGridX, targetGridY)) {
+            selectCell(targetGridX, targetGridY);
+        }
+    } else {
+        showFeedback(castResult.message, 3.5f);
+    }
+}
+
+void Game::toggleDivinePowerTargeting(DivinePowerType type) {
+    if (m_activeDivinePower == type) {
+        m_activeDivinePower = DivinePowerType::Inactive;
+        m_renderer.setActiveDivinePower(DivinePowerType::Inactive);
+        showFeedback("Modo apuntar desactivado.", 2.0f);
+    } else {
+        int cost = m_divinePowers.getPowerCost(type);
+        Religion* pRel = m_registry.getReligion(resolvePlayerReligionId());
+        if (pRel && pRel->theologyPoints < cost) {
+            showFeedback("FE INSUFICIENTE: Se requieren " + std::to_string(cost) +
+                         " pts de Fe para " + m_divinePowers.getPowerName(type) + ".", 3.5f);
+            return;
+        }
+        m_activeDivinePower = type;
+        m_renderer.setActiveDivinePower(type);
+        showFeedback("[MODO APUNTAR] " + m_divinePowers.getPowerName(type) + " (Costo: " +
+                     std::to_string(cost) + " Fe) - Haz clic en el mapa.", 4.0f);
     }
 }
 
@@ -351,10 +540,12 @@ void Game::triggerSchismAtSelection() {
     m_map.recalculateReligions(m_registry);
 }
 
+// EN: Consecrate or upgrade a holy site at the selected cell
+// ES: Consagrar o mejorar un sitio sagrado en la celda seleccionada
 void Game::buildHolySiteAtSelection() {
     if (m_map.isValid(m_selectedCell.x, m_selectedCell.y)) {
-        Cell& c = m_map.getCell(m_selectedCell.x, m_selectedCell.y);
-        if (!c.hasHolySite) {
+        Cell& selectedCellRef = m_map.getCell(m_selectedCell.x, m_selectedCell.y);
+        if (!selectedCellRef.hasHolySite) {
             m_map.consecrateHolySite(m_selectedCell.x, m_selectedCell.y, "Grand Sanctuary of the Chosen");
         } else {
             m_map.upgradeHolySite(m_selectedCell.x, m_selectedCell.y);
@@ -365,13 +556,15 @@ void Game::buildHolySiteAtSelection() {
             "Monument Consecrated",
             "A monumental sacred sanctuary was consecrated at grid (" +
             std::to_string(m_selectedCell.x) + ", " + std::to_string(m_selectedCell.y) + ").",
-            m_selectedCell, c.dominantReligionId, 0, ColorRGB(255, 215, 0)
+            m_selectedCell, selectedCellRef.dominantReligionId, 0, ColorRGB(255, 215, 0)
         );
         m_map.recalculateReligions(m_registry);
     }
 }
 
 void Game::processButtonAction(int buttonId) {
+    m_soundSystem.playSFX(SFXType::UIClick, 0.65f);
+
     // El desplegable de opciones sólo se mantiene abierto al pulsar su propio botón MENU
     if (buttonId != 400) {
         m_renderer.setOptionsDropdownOpen(false);
@@ -380,6 +573,27 @@ void Game::processButtonAction(int buttonId) {
     switch (buttonId) {
         case 400: // MENU -> abrir/cerrar el desplegable de opciones de partida
             m_renderer.setOptionsDropdownOpen(!m_renderer.isOptionsDropdownOpen());
+            break;
+        case 450: // EVENTOS -> abrir/cerrar la ventana de eventos avanzados / crónica sagrada
+            m_renderer.toggleChronicle();
+            if (m_renderer.isChronicleOpen()) {
+                m_renderer.setFaithTreeOpen(false);
+            }
+            break;
+        case 470: // MANDATOS -> abrir/cerrar modal de moral religiosa y mandatos
+            m_renderer.toggleMoralRulesModal();
+            if (m_renderer.isMoralRulesModalOpen()) {
+                m_renderer.setChronicleOpen(false);
+                m_renderer.setFaithTreeOpen(false);
+                m_renderer.setMemoryTreeOpen(false);
+            }
+            break;
+        case 460: // AVANCES -> abrir/cerrar el árbol teológico de avances de la fe
+            m_renderer.toggleFaithTree();
+            if (m_renderer.isFaithTreeOpen()) {
+                m_renderer.setChronicleOpen(false);
+                m_renderer.setMoralRulesModalOpen(false);
+            }
             break;
         case 405: // CONSOLA DE TRUCOS (equivale a pulsar Enter)
             m_commandBoxOpen = true;
@@ -425,43 +639,79 @@ void Game::processButtonAction(int buttonId) {
             m_gameState = GameState::MainMenu;
             break;
 
-        // Opciones de la Unidad / Señales Divinas del Chamán (Zona Verde)
-        case 701:
-        case 702:
-        case 703: {
-            const Humano* sel = m_gestorHumanos.getHumanoSeleccionado();
-            if (!sel && !m_gestorHumanos.getHumanos().empty()) {
-                m_gestorHumanos.seleccionarHumano(m_gestorHumanos.getHumanos()[0].getId());
-                sel = m_gestorHumanos.getHumanoSeleccionado();
+        // Selección del líder espiritual (Chamán o Profeta)
+        case 700: {
+            int pRel = resolvePlayerReligionId();
+            int lId = m_gestorHumanos.buscarLiderEspiritualDeReligion(pRel);
+            if (lId <= 0) {
+                std::string t, n;
+                lId = DivinePowersSystem::ensureIntermediary(m_gestorHumanos, m_registry, pRel, t, n);
             }
-            if (sel && sel->esChaman()) {
-                int tipoSenal = (buttonId == 701) ? 1 : ((buttonId == 702) ? 2 : 3);
-                m_gestorHumanos.ejecutarSenalDivina(tipoSenal, m_map, m_registry, m_eventLine, m_timeline.getCurrentYear());
-            } else if (buttonId == 703) {
-                int targetRel = sel ? sel->getReligionId() : 1;
-                int chamanId = m_gestorHumanos.buscarChamanDeReligion(targetRel);
-                if (chamanId <= 0) chamanId = m_gestorHumanos.buscarChamanDeReligion(1);
-                if (chamanId > 0) {
-                    m_gestorHumanos.seleccionarHumano(chamanId);
-                    const Humano* ch = m_gestorHumanos.getHumanoSeleccionado();
-                    if (ch && m_map.isValid(ch->getCeldaX(), ch->getCeldaY())) {
-                        m_camera.centerOnCell(ch->getCeldaX(), ch->getCeldaY(), m_map.getWidth(), m_map.getHeight());
-                        selectCell(ch->getCeldaX(), ch->getCeldaY());
-                    }
+            if (lId > 0) {
+                m_gestorHumanos.seleccionarHumano(lId);
+                const Humano* ch = m_gestorHumanos.getHumanoSeleccionado();
+                if (ch && m_map.isValid(ch->getCeldaX(), ch->getCeldaY())) {
+                    m_camera.centerOnCell(ch->getCeldaX(), ch->getCeldaY(), m_map.getWidth(), m_map.getHeight());
+                    selectCell(ch->getCeldaX(), ch->getCeldaY());
                 }
             }
             break;
         }
+
+        // Ventana Modal del Árbol de Recuerdos (Sistema Sísifo & Némesis)
+        case 750: {
+            m_renderer.toggleMemoryTree();
+            if (m_renderer.isMemoryTreeOpen()) {
+                m_renderer.setChronicleOpen(false);
+                m_renderer.setFaithTreeOpen(false);
+            }
+            break;
+        }
+
+        // Poderes Divinos del Usuario e Intermediario
+        case 710:
+        case 701:
+            toggleDivinePowerTargeting(DivinePowerType::Lightning);
+            break;
+        case 711:
+            toggleDivinePowerTargeting(DivinePowerType::Plague);
+            break;
+        case 712:
+        case 703:
+            toggleDivinePowerTargeting(DivinePowerType::Miracle);
+            break;
+        case 713:
+        case 702:
+            castDivinePower(DivinePowerType::Congregate, 0, 0);
+            break;
+        case 720:
+            toggleDivinePowerTargeting(DivinePowerType::Tornado);
+            break;
+        case 721:
+            toggleDivinePowerTargeting(DivinePowerType::Earthquake);
+            break;
+        case 722:
+            toggleDivinePowerTargeting(DivinePowerType::Pandemic);
+            break;
+        case 723:
+            toggleDivinePowerTargeting(DivinePowerType::Meteor);
+            break;
+        case 724:
+            toggleDivinePowerTargeting(DivinePowerType::Volcano);
+            break;
+        case 725:
+            toggleDivinePowerTargeting(DivinePowerType::Wildfire);
+            break;
         default: break;
     }
 }
 
-void Game::onMouseDown(int button, float x, float y) {
-    m_mouseX = x;
-    m_mouseY = y;
+void Game::onMouseDown(int mouseButton, float screenPosX, float screenPosY) {
+    m_mouseX = screenPosX;
+    m_mouseY = screenPosY;
     if (m_gameState == GameState::MainMenu) {
-        if (button == 1) {
-            int btnId = m_renderer.checkMenuButtonClicked(x, y, false);
+        if (mouseButton == 1) {
+            int btnId = m_renderer.checkMenuButtonClicked(screenPosX, screenPosY, false);
             if (btnId == 1) { // CREAR MUNDO -> Abrir ventana de configuración
                 m_gameState = GameState::WorldCreation;
                 m_activeInputField = 0;
@@ -478,8 +728,8 @@ void Game::onMouseDown(int button, float x, float y) {
     }
 
     if (m_gameState == GameState::WorldCreation) {
-        if (button == 1) {
-            int btnId = m_renderer.checkCreationButtonClicked(x, y);
+        if (mouseButton == 1) {
+            int btnId = m_renderer.checkCreationButtonClicked(screenPosX, screenPosY);
             if (btnId == 550) { // Cancelar y volver
                 m_gameState = GameState::MainMenu;
                 m_activeInputField = 0;
@@ -499,11 +749,24 @@ void Game::onMouseDown(int button, float x, float y) {
                 else if (m_creationConfig.initialPopulation == 120) m_creationConfig.initialPopulation = 180;
                 else if (m_creationConfig.initialPopulation == 180) m_creationConfig.initialPopulation = 250;
                 else m_creationConfig.initialPopulation = 40;
+            } else if (btnId == 516) { // Input Recursos Iniciales (Caja de texto o ciclo al hacer clic)
+                if (m_creationConfig.initialResources == 100) m_creationConfig.initialResources = 250;
+                else if (m_creationConfig.initialResources == 250) m_creationConfig.initialResources = 500;
+                else if (m_creationConfig.initialResources == 500) m_creationConfig.initialResources = 1000;
+                else if (m_creationConfig.initialResources == 1000) m_creationConfig.initialResources = 2000;
+                else m_creationConfig.initialResources = 100;
+                m_activeInputField = 516;
             } else if (btnId == 506) { // Ciclar época de inicio
                 uint8_t nextEra = (static_cast<uint8_t>(m_creationConfig.startingEra) + 1) % 8;
                 m_creationConfig.startingEra = static_cast<HistoricalEra>(nextEra);
             } else if (btnId == 507) { // Ciclar tamaño del mapa
                 m_creationConfig.mapSizeIndex = (m_creationConfig.mapSizeIndex + 1) % 3;
+            } else if (btnId == 520) { // Ciclar clima primordial del mundo
+                uint8_t nextClimate = (static_cast<uint8_t>(m_creationConfig.worldClimate) + 1) % 4;
+                m_creationConfig.worldClimate = static_cast<WorldClimate>(nextClimate);
+            } else if (btnId == 517) { // Ciclar abundancia de recursos naturales
+                uint8_t nextAbundance = (static_cast<uint8_t>(m_creationConfig.resourceAbundance) + 1) % 3;
+                m_creationConfig.resourceAbundance = static_cast<ResourceAbundance>(nextAbundance);
             } else if (btnId == 508) { // Ciclar cataclismos
                 m_creationConfig.disasterFrequency = (m_creationConfig.disasterFrequency + 1) % 3;
             } else if (btnId == 509) { // Ciclar tipo de partida
@@ -511,9 +774,15 @@ void Game::onMouseDown(int button, float x, float y) {
                 m_creationConfig.gameMode = static_cast<GameModeType>(nextMode);
             } else if (btnId == 510) { // Cofre inicial toggle
                 m_creationConfig.starterChest = !m_creationConfig.starterChest;
-            } else if (btnId == 511) { // Ciclar dificultad IA
+            } else if (btnId == 511) { // Ciclar dificultad IA (100% conductual sin ventajas numéricas)
                 uint8_t nextDiff = (static_cast<uint8_t>(m_creationConfig.aiDifficulty) + 1) % 4;
                 m_creationConfig.aiDifficulty = static_cast<AIDifficulty>(nextDiff);
+            } else if (btnId == 521) { // Ciclar ritmo histórico / escala temporal
+                uint8_t nextPacing = (static_cast<uint8_t>(m_creationConfig.timePacing) + 1) % 3;
+                m_creationConfig.timePacing = static_cast<TimePacing>(nextPacing);
+            } else if (btnId == 522) { // Ciclar beligerancia tribal / fricción liminal
+                uint8_t nextBell = (static_cast<uint8_t>(m_creationConfig.tribalBelligerence) + 1) % 3;
+                m_creationConfig.tribalBelligerence = static_cast<TribalBelligerence>(nextBell);
             } else if (btnId == 512) { // Ciclar color de influencia
                 m_creationConfig.influenceColorIndex = (m_creationConfig.influenceColorIndex + 1) % 5;
             } else if (btnId == 513) { // Ciclar condición de victoria
@@ -529,9 +798,9 @@ void Game::onMouseDown(int button, float x, float y) {
     }
 
     if (m_gameState == GameState::LoadWorldMenu) {
-        if (button == 1) {
+        if (mouseButton == 1) {
             auto saves = SaveSystem::scanSaveSlots();
-            int btnId = m_renderer.checkLoadMenuButtonClicked(x, y, static_cast<int>(saves.size()));
+            int btnId = m_renderer.checkLoadMenuButtonClicked(screenPosX, screenPosY, static_cast<int>(saves.size()));
             if (btnId >= 1000) {
                 // Seleccionar slot de mundo
                 m_selectedSaveIndex = btnId - 1000;
@@ -555,8 +824,8 @@ void Game::onMouseDown(int button, float x, float y) {
     }
 
     if (m_gameState == GameState::Options) {
-        if (button == 1) {
-            int btnId = m_renderer.checkMenuButtonClicked(x, y, true);
+        if (mouseButton == 1) {
+            int btnId = m_renderer.checkMenuButtonClicked(screenPosX, screenPosY, true);
             if (btnId == 12) { // VOLVER AL MENU
                 m_gameState = GameState::MainMenu;
             }
@@ -564,10 +833,34 @@ void Game::onMouseDown(int button, float x, float y) {
         return;
     }
 
-    if (button == 1) { // Left Click
+    if (m_gameState == GameState::GameOver) {
+        if (mouseButton == 1) {
+            int btnId = m_renderer.checkGameOverButtonClicked(screenPosX, screenPosY);
+            if (btnId == 901) { // REINTENTAR GÉNESIS
+                m_gameState = GameState::WorldCreation;
+                m_activeInputField = 0;
+                m_gameOverTriggered = false;
+                m_gameOverTimer = 0.0f;
+            } else if (btnId == 902) { // CARGAR PARTIDA
+                m_gameState = GameState::LoadWorldMenu;
+                m_selectedSaveIndex = 0;
+                m_gameOverTriggered = false;
+                m_gameOverTimer = 0.0f;
+            } else if (btnId == 903) { // MENÚ PRINCIPAL
+                m_gameState = GameState::MainMenu;
+                m_gameOverTriggered = false;
+                m_gameOverTimer = 0.0f;
+            }
+        }
+        return;
+    }
+
+    if (mouseButton == 1) { // Left Click
+        m_renderer.setMouseDown(true, screenPosX, screenPosY);
         // 1. Check UI button clicks
-        int btnId = m_renderer.checkButtonClicked(x, y);
+        int btnId = m_renderer.checkButtonClicked(screenPosX, screenPosY);
         if (btnId > 0) {
+            m_renderer.triggerButtonPress(btnId);
             processButtonAction(btnId);
             return;
         }
@@ -577,18 +870,89 @@ void Game::onMouseDown(int button, float x, float y) {
             return;
         }
 
+        // Si el modal de la crónica de eventos avanzados está abierto, procesar sus clics interactivos
+        if (m_renderer.isChronicleOpen()) {
+            Point2i jumpTarget{-1, -1};
+            int action = m_renderer.checkChronicleModalClick(screenPosX, screenPosY, m_eventLine,
+                                                            m_renderer.getChronicleFilter(),
+                                                            m_renderer.getChronicleScroll(),
+                                                            jumpTarget);
+            if (action == 1) { // Cerrar modal [X] o clic fuera
+                m_renderer.setChronicleOpen(false);
+                return;
+            } else if (action >= 10 && action <= 16) { // Cambiar filtro
+                m_renderer.setChronicleFilter(action - 10);
+                return;
+            } else if (action == 20) { // Scroll izq [<]
+                m_renderer.scrollChronicle(-1);
+                return;
+            } else if (action == 21) { // Scroll der [>]
+                m_renderer.scrollChronicle(1);
+                return;
+            } else if (action == 30) { // Salto a ubicación "IR AL LUGAR"
+                if (m_map.isValid(jumpTarget.x, jumpTarget.y)) {
+                    m_camera.centerOnCell(jumpTarget.x, jumpTarget.y, m_map.getWidth(), m_map.getHeight());
+                    selectCell(jumpTarget.x, jumpTarget.y);
+                }
+                m_renderer.setChronicleOpen(false);
+                return;
+            }
+            return; // Absorber clics dentro del modal
+        }
+
+        // Si el modal del árbol de avances está abierto, procesar sus clics interactivos
+        if (m_renderer.isFaithTreeOpen()) {
+            int selAdvId = m_renderer.getSelectedAdvancementId();
+            int action = m_renderer.checkFaithTreeModalClick(screenPosX, screenPosY, m_registry, m_advancement, selAdvId);
+            m_renderer.setSelectedAdvancementId(selAdvId);
+            if (action == 1) { // Cerrar modal [X] o clic fuera
+                m_renderer.setFaithTreeOpen(false);
+                return;
+            } else if (action == 2) { // Convalidar avance
+                Religion* pRel = m_registry.getReligion(PLAYER_RELIGION_ID);
+                if (pRel) {
+                    std::vector<GameEvent> newEvents;
+                    if (m_advancement.convalidateAdvancement(*pRel, selAdvId, m_timeline.getCurrentYear(), newEvents)) {
+                        for (const auto& ev : newEvents) {
+                            m_eventLine.addEvent(ev);
+                        }
+                    }
+                }
+                return;
+            }
+            return; // Absorber clics dentro del modal
+        }
+
+        // Si el modal del árbol de recuerdos (Sísifo & Némesis) está abierto, procesar sus clics interactivos
+        if (m_renderer.isMemoryTreeOpen()) {
+            int action = m_renderer.checkMemoryTreeModalClick(screenPosX, screenPosY);
+            if (action == 1) { // Cerrar modal [X] o clic fuera
+                m_renderer.setMemoryTreeOpen(false);
+            }
+            return; // Absorber clics dentro del modal
+        }
+
+        // Si el modal de moral religiosa y mandatos está abierto, procesar sus clics interactivos
+        if (m_renderer.isMoralRulesModalOpen()) {
+            int action = m_renderer.checkMoralRulesModalClick(screenPosX, screenPosY, m_moralitySystem, resolvePlayerReligionId(), m_registry);
+            if (action == 1) { // Cerrar modal [X] o clic fuera
+                m_renderer.setMoralRulesModalOpen(false);
+            }
+            return; // Absorber clics dentro del modal
+        }
+
         const int botH = 118;
         const int botY = m_windowHeight - botH;
 
         // 2. Minimapa Clic (panel inferior derecho)
         // Mover la cámara directamente al hacer clic en el minimapa
         const int amarilloX = static_cast<int>(m_windowWidth * 0.815f);
-        if (x >= amarilloX && y >= botY) {
-            int mmSize = 92, mmX = 0, mmY = 0;
-            m_renderer.getMinimapRect(mmX, mmY, mmSize);
-            if (x >= mmX && x <= mmX + mmSize && y >= mmY && y <= mmY + mmSize) {
-                float normX = (x - mmX) / static_cast<float>(mmSize);
-                float normY = (y - mmY) / static_cast<float>(mmSize);
+        if (screenPosX >= amarilloX && screenPosY >= botY) {
+            int mmX = 0, mmY = 0, mmW = 0, mmH = 0;
+            m_renderer.getMinimapRect(mmX, mmY, mmW, mmH);
+            if (screenPosX >= mmX && screenPosX <= mmX + mmW && screenPosY >= mmY && screenPosY <= mmY + mmH) {
+                float normX = (screenPosX - mmX) / static_cast<float>(mmW);
+                float normY = (screenPosY - mmY) / static_cast<float>(mmH);
                 int targetGx = static_cast<int>(normX * m_map.getWidth());
                 int targetGy = static_cast<int>(normY * m_map.getHeight());
                 m_camera.centerOnCell(targetGx, targetGy, m_map.getWidth(), m_map.getHeight());
@@ -605,8 +969,8 @@ void Game::onMouseDown(int button, float x, float y) {
         int trackY = botY + 14;
         int trackW = azulW - 32;
 
-        if (y >= trackY - 8 && y <= trackY + 16 && x >= trackX && x <= trackX + trackW) {
-            float prog = (x - trackX) / static_cast<float>(trackW);
+        if (screenPosY >= trackY - 8 && screenPosY <= trackY + 16 && screenPosX >= trackX && screenPosX <= trackX + trackW) {
+            float prog = (screenPosX - trackX) / static_cast<float>(trackW);
             m_timeline.scrubToProgress(prog);
             m_scrubbingTimeline = true;
             return;
@@ -616,32 +980,42 @@ void Game::onMouseDown(int button, float x, float y) {
         int cardY = botY + 28;
         int cardW = (azulW - 48) / 3;
         int cardH = 46;
-        if (y >= cardY && y <= cardY + cardH && x >= trackX && x <= trackX + trackW) {
+        if (screenPosY >= cardY && screenPosY <= cardY + cardH && screenPosX >= trackX && screenPosX <= trackX + trackW) {
             auto recents = m_eventLine.getRecentEvents(3);
-            for (size_t i = 0; i < recents.size(); ++i) {
-                int cx = trackX + static_cast<int>(i) * (cardW + 8);
-                if (x >= cx && x <= cx + cardW) {
-                    m_camera.centerOnCell(recents[i].location.x, recents[i].location.y,
+            for (size_t eventIndex = 0; eventIndex < recents.size(); ++eventIndex) {
+                int cardPosX = trackX + static_cast<int>(eventIndex) * (cardW + 8);
+                if (screenPosX >= cardPosX && screenPosX <= cardPosX + cardW) {
+                    m_camera.centerOnCell(recents[eventIndex].location.x, recents[eventIndex].location.y,
                                           m_map.getWidth(), m_map.getHeight());
-                    selectCell(recents[i].location.x, recents[i].location.y);
+                    selectCell(recents[eventIndex].location.x, recents[eventIndex].location.y);
                     return;
                 }
             }
         }
 
-        // 5. Clic en el Mundo Isométrico (Selección de Aldeano o Celda)
-        if (y < botY && y > 34) {
-            int gx = 0, gy = 0;
-            m_camera.screenToGrid(x, y, gx, gy);
+        // 5. Clic en el Mundo Isométrico (Lanzamiento de Poder Divino, o Selección de Aldeano/Celda)
+        if (screenPosY < botY && screenPosY > 34) {
+            int gridCellX = 0, gridCellY = 0;
+            m_camera.screenToGrid(screenPosX, screenPosY, gridCellX, gridCellY);
+
+            if (m_activeDivinePower != DivinePowerType::Inactive) {
+                if (m_map.isValid(gridCellX, gridCellY)) {
+                    DivinePowerType pow = m_activeDivinePower;
+                    m_activeDivinePower = DivinePowerType::Inactive;
+                    m_renderer.setActiveDivinePower(DivinePowerType::Inactive);
+                    castDivinePower(pow, gridCellX, gridCellY);
+                    return;
+                }
+            }
 
             // Primero buscar si se hizo clic directamente sobre el sprite de un aldeano en pantalla.
             // Fog of War: sólo se pueden seleccionar unidades del pueblo del jugador
             // (salvo con el truco SELECTOR, que permite seleccionar cualquier unidad).
             const int onlyRel = m_cheatSelectorActive ? -1 : PLAYER_RELIGION_ID;
-            int humanoId = m_gestorHumanos.buscarHumanoEnPantalla(x, y, m_camera, m_map, onlyRel);
+            int humanoId = m_gestorHumanos.buscarHumanoEnPantalla(screenPosX, screenPosY, m_camera, m_map, onlyRel);
             if (humanoId <= 0) {
-                humanoId = m_gestorHumanos.buscarHumanoCercano(static_cast<float>(gx) + 0.5f,
-                                                               static_cast<float>(gy) + 0.5f, 0.85f, onlyRel);
+                humanoId = m_gestorHumanos.buscarHumanoCercano(static_cast<float>(gridCellX) + 0.5f,
+                                                               static_cast<float>(gridCellY) + 0.5f, 0.85f, onlyRel);
             }
             if (humanoId > 0 && !m_cheatSelectorActive) {
                 const Humano* cand = nullptr;
@@ -659,91 +1033,141 @@ void Game::onMouseDown(int button, float x, float y) {
                 }
             } else {
                 m_gestorHumanos.seleccionarHumano(-1);
-                if (m_map.isValid(gx, gy)) {
+                if (m_map.isValid(gridCellX, gridCellY)) {
                     // Las celdas ocultas por la niebla no revelan información
-                    selectCell(gx, gy);
+                    selectCell(gridCellX, gridCellY);
                 }
             }
         }
-    } else if (button == 3) { // Right Click: mover unidad seleccionada si el truco SELECTOR está activo, o arrastrar cámara
+    } else if (mouseButton == 3) { // Right Click: cancelar apuntado de poder divino, o mover unidad con SELECTOR, o arrastrar cámara
+        if (m_activeDivinePower != DivinePowerType::Inactive) {
+            m_activeDivinePower = DivinePowerType::Inactive;
+            m_renderer.setActiveDivinePower(DivinePowerType::Inactive);
+            showFeedback("Modo apuntar cancelado.", 2.0f);
+            return;
+        }
         const int botH = 118;
         const int botY = m_windowHeight - botH;
-        Humano* sel = m_gestorHumanos.getHumanoSeleccionadoMutable();
-        if (m_cheatSelectorActive && sel && y > 34 && y < botY) {
-            float halfW = BASE_TILE_WIDTH * 0.5f;
-            float halfH = BASE_TILE_HEIGHT * 0.5f;
-            float isoX = (x - m_camera.getCameraX()) / m_camera.getZoom();
-            float isoY = (y - m_camera.getCameraY()) / m_camera.getZoom() + 0.50f * ELEVATION_STEP;
-            float u = isoX / halfW;
-            float v = isoY / halfH;
-            float gx = (u + v) * 0.5f;
-            float gy = (v - u) * 0.5f;
+        Humano* selectedVillager = m_gestorHumanos.getHumanoSeleccionadoMutable();
+        if (m_cheatSelectorActive && selectedVillager && screenPosY > 34 && screenPosY < botY) {
+            const float halfTileWidth = BASE_TILE_WIDTH * 0.5f;
+            const float halfTileHeight = BASE_TILE_HEIGHT * 0.5f;
+            const float isoX = (screenPosX - m_camera.getCameraX()) / m_camera.getZoom();
+            float isoY = (screenPosY - m_camera.getCameraY()) / m_camera.getZoom() + 0.50f * ELEVATION_STEP;
+            const float normalizedIsoX = isoX / halfTileWidth;
+            float normalizedIsoY = isoY / halfTileHeight;
+            float gridWorldX = (normalizedIsoX + normalizedIsoY) * 0.5f;
+            float gridWorldY = (normalizedIsoY - normalizedIsoX) * 0.5f;
 
-            int cellX = std::clamp(static_cast<int>(std::floor(gx)), 0, m_map.getWidth() - 1);
-            int cellY = std::clamp(static_cast<int>(std::floor(gy)), 0, m_map.getHeight() - 1);
-            float realElev = m_map.getCell(cellX, cellY).elevation;
+            const int cellX = std::clamp(static_cast<int>(std::floor(gridWorldX)), 0, m_map.getWidth() - 1);
+            const int cellY = std::clamp(static_cast<int>(std::floor(gridWorldY)), 0, m_map.getHeight() - 1);
+            const float realElevation = m_map.getCell(cellX, cellY).elevation;
 
-            isoY = (y - m_camera.getCameraY()) / m_camera.getZoom() + realElev * ELEVATION_STEP;
-            v = isoY / halfH;
-            gx = std::clamp((u + v) * 0.5f, 0.5f, static_cast<float>(m_map.getWidth()) - 0.5f);
-            gy = std::clamp((v - u) * 0.5f, 0.5f, static_cast<float>(m_map.getHeight()) - 0.5f);
+            isoY = (screenPosY - m_camera.getCameraY()) / m_camera.getZoom() + realElevation * ELEVATION_STEP;
+            normalizedIsoY = isoY / halfTileHeight;
+            gridWorldX = std::clamp((normalizedIsoX + normalizedIsoY) * 0.5f, 0.5f, static_cast<float>(m_map.getWidth()) - 0.5f);
+            gridWorldY = std::clamp((normalizedIsoY - normalizedIsoX) * 0.5f, 0.5f, static_cast<float>(m_map.getHeight()) - 0.5f);
 
-            sel->ordenarMovimientoManual(gx, gy);
-            selectCell(static_cast<int>(std::floor(gx)), static_cast<int>(std::floor(gy)));
+            const int targetCellX = std::clamp(static_cast<int>(std::floor(gridWorldX)), 0, m_map.getWidth() - 1);
+            const int targetCellY = std::clamp(static_cast<int>(std::floor(gridWorldY)), 0, m_map.getHeight() - 1);
+            if (!selectedVillager->puedeCaminarSobreAguaYTerrenoPeligroso() && !m_map.getCell(targetCellX, targetCellY).isPassableForGround()) {
+                showFeedback("Las unidades terrestres no pueden transitar aguas ni terreno peligroso.", 2.5f);
+            } else {
+                selectedVillager->ordenarMovimientoManual(gridWorldX, gridWorldY);
+                selectCell(targetCellX, targetCellY);
+            }
         } else {
-            m_camera.startDrag(x, y);
+            m_camera.startDrag(screenPosX, screenPosY);
         }
     }
 }
 
-void Game::onMouseUp(int button, float x, float y) {
-    (void)x;
-    (void)y;
-    if (button == 1) {
+void Game::onMouseUp(int mouseButton, float screenPosX, float screenPosY) {
+    if (mouseButton == 1) {
         m_scrubbingTimeline = false;
-    } else if (button == 3) {
+        m_renderer.setMouseDown(false, screenPosX, screenPosY);
+    } else if (mouseButton == 3) {
         m_camera.endDrag();
     }
 }
 
-void Game::onMouseMove(float x, float y) {
-    m_mouseX = x;
-    m_mouseY = y;
+void Game::onMouseMove(float screenPosX, float screenPosY) {
+    m_mouseX = screenPosX;
+    m_mouseY = screenPosY;
+    m_renderer.setMousePosition(screenPosX, screenPosY);
     if (m_gameState == GameState::MainMenu) {
-        m_hoveredMenuButtonId = m_renderer.checkMenuButtonClicked(x, y, false);
+        m_hoveredMenuButtonId = m_renderer.checkMenuButtonClicked(screenPosX, screenPosY, false);
         return;
     }
     if (m_gameState == GameState::WorldCreation) {
-        m_hoveredMenuButtonId = m_renderer.checkCreationButtonClicked(x, y);
+        m_hoveredMenuButtonId = m_renderer.checkCreationButtonClicked(screenPosX, screenPosY);
         return;
     }
     if (m_gameState == GameState::LoadWorldMenu) {
         auto saves = SaveSystem::scanSaveSlots();
-        m_hoveredMenuButtonId = m_renderer.checkLoadMenuButtonClicked(x, y, static_cast<int>(saves.size()));
+        m_hoveredMenuButtonId = m_renderer.checkLoadMenuButtonClicked(screenPosX, screenPosY, static_cast<int>(saves.size()));
         return;
     }
 
     if (m_gameState == GameState::Options) {
-        m_hoveredMenuButtonId = m_renderer.checkMenuButtonClicked(x, y, true);
+        m_hoveredMenuButtonId = m_renderer.checkMenuButtonClicked(screenPosX, screenPosY, true);
+        return;
+    }
+
+    if (m_gameState == GameState::GameOver) {
+        m_hoveredMenuButtonId = m_renderer.checkGameOverButtonClicked(screenPosX, screenPosY);
         return;
     }
 
     if (m_camera.isDragging()) {
-        m_camera.updateDrag(x, y);
+        m_camera.updateDrag(screenPosX, screenPosY);
     } else if (m_scrubbingTimeline) {
-        int trackX = 40;
-        int trackW = m_windowWidth - 80;
-        float prog = (x - trackX) / static_cast<float>(trackW);
+        const int trackX = 40;
+        const int trackW = m_windowWidth - 80;
+        const float prog = (screenPosX - trackX) / static_cast<float>(trackW);
         m_timeline.scrubToProgress(prog);
     }
 }
 
-void Game::onMouseWheel(float delta, float x, float y) {
-    float factor = (delta > 0.0f) ? 1.15f : 0.85f;
-    m_camera.zoomBy(factor, x, y);
+void Game::onMouseWheel(float wheelDelta, float screenPosX, float screenPosY) {
+    if (m_renderer.isChronicleOpen()) {
+        if (wheelDelta > 0.0f) {
+            m_renderer.scrollChronicle(-1);
+        } else {
+            m_renderer.scrollChronicle(1);
+        }
+        return;
+    }
+    if (m_renderer.isMemoryTreeOpen()) {
+        if (wheelDelta > 0.0f) {
+            m_renderer.scrollMemoryTree(-1);
+        } else {
+            m_renderer.scrollMemoryTree(1);
+        }
+        return;
+    }
+    const float zoomFactor = (wheelDelta > 0.0f) ? 1.15f : 0.85f;
+    m_camera.zoomBy(zoomFactor, screenPosX, screenPosY);
 }
 
 void Game::onKeyPress(int keySym) {
+    if (m_gameState == GameState::GameOver) {
+        if (keySym == 27) { // ESC -> Salir al menú principal
+            m_gameState = GameState::MainMenu;
+            m_gameOverTriggered = false;
+            m_gameOverTimer = 0.0f;
+            return;
+        }
+        if (keySym == 13 || keySym == 10 || keySym == 32) { // Enter o Espacio -> Reintentar Génesis
+            m_gameState = GameState::WorldCreation;
+            m_activeInputField = 0;
+            m_gameOverTriggered = false;
+            m_gameOverTimer = 0.0f;
+            return;
+        }
+        return;
+    }
+
     if (m_gameState == GameState::WorldCreation) {
         if (keySym == 27) { // ESC -> Salir al menú
             m_gameState = GameState::MainMenu;
@@ -780,6 +1204,17 @@ void Game::onKeyPress(int keySym) {
             }
             return;
         }
+        if (m_activeInputField == 516) { // Cantidad Inicial de Recursos
+            if (keySym == 8) {
+                m_creationConfig.initialResources /= 10;
+            } else if (keySym >= '0' && keySym <= '9') {
+                int digit = keySym - '0';
+                if (m_creationConfig.initialResources < 100000) {
+                    m_creationConfig.initialResources = m_creationConfig.initialResources * 10 + digit;
+                }
+            }
+            return;
+        }
         return;
     }
 
@@ -808,6 +1243,100 @@ void Game::onKeyPress(int keySym) {
             m_isRunning = false;
             return;
         }
+    }
+
+    // Si el modal de la crónica de eventos avanzados está abierto
+    if (m_gameState == GameState::Playing && m_renderer.isChronicleOpen()) {
+        if (keySym == 27 || keySym == 'e' || keySym == 'E' || keySym == 'c' || keySym == 'C') { // ESC, E o C -> Cerrar
+            m_renderer.setChronicleOpen(false);
+            return;
+        }
+        if (keySym == 65361) { // Left Arrow
+            m_renderer.scrollChronicle(-1);
+            return;
+        }
+        if (keySym == 65363) { // Right Arrow
+            m_renderer.scrollChronicle(1);
+            return;
+        }
+        return;
+    }
+
+    // Si el modal del árbol de avances está abierto
+    if (m_gameState == GameState::Playing && m_renderer.isFaithTreeOpen()) {
+        if (keySym == 27 || keySym == 't' || keySym == 'T' || keySym == 'a' || keySym == 'A') { // ESC, T o A -> Cerrar
+            m_renderer.setFaithTreeOpen(false);
+            return;
+        }
+        return;
+    }
+
+    // Si el modal de moral religiosa y mandatos está abierto
+    if (m_gameState == GameState::Playing && m_renderer.isMoralRulesModalOpen()) {
+        if (keySym == 27 || keySym == 'm' || keySym == 'M') { // ESC o M -> Cerrar
+            m_renderer.setMoralRulesModalOpen(false);
+            return;
+        }
+        return;
+    }
+
+    // Si el modal del árbol de recuerdos (Sísifo & Némesis) está abierto
+    if (m_gameState == GameState::Playing && m_renderer.isMemoryTreeOpen()) {
+        if (keySym == 27 || keySym == 'n' || keySym == 'N') { // ESC o N -> Cerrar
+            m_renderer.setMemoryTreeOpen(false);
+            return;
+        }
+        if (keySym == 65362 || keySym == 'w' || keySym == 'W') { // Flecha arriba o W
+            m_renderer.scrollMemoryTree(-1);
+            return;
+        }
+        if (keySym == 65364 || keySym == 's' || keySym == 'S') { // Flecha abajo o S
+            m_renderer.scrollMemoryTree(1);
+            return;
+        }
+        return;
+    }
+
+    // Tecla 'E' o 'C' para abrir la crónica sagrada de eventos
+    if (m_gameState == GameState::Playing && !m_commandBoxOpen && (keySym == 'e' || keySym == 'E' || keySym == 'c' || keySym == 'C')) {
+        m_renderer.toggleChronicle();
+        if (m_renderer.isChronicleOpen()) {
+            m_renderer.setFaithTreeOpen(false);
+            m_renderer.setMemoryTreeOpen(false);
+        }
+        return;
+    }
+
+    // Tecla 'T' o 'A' para abrir el árbol de avances de la fe
+    if (m_gameState == GameState::Playing && !m_commandBoxOpen && (keySym == 't' || keySym == 'T' || keySym == 'a' || keySym == 'A')) {
+        m_renderer.toggleFaithTree();
+        if (m_renderer.isFaithTreeOpen()) {
+            m_renderer.setChronicleOpen(false);
+            m_renderer.setMemoryTreeOpen(false);
+        }
+        return;
+    }
+
+    // Tecla 'N' para abrir el árbol de recuerdos y mitos (Némesis & Sísifo)
+    if (m_gameState == GameState::Playing && !m_commandBoxOpen && (keySym == 'n' || keySym == 'N')) {
+        m_renderer.toggleMemoryTree();
+        if (m_renderer.isMemoryTreeOpen()) {
+            m_renderer.setChronicleOpen(false);
+            m_renderer.setFaithTreeOpen(false);
+            m_renderer.setMoralRulesModalOpen(false);
+        }
+        return;
+    }
+
+    // Tecla 'M' para abrir el modal de Mandatos y Moral Religiosa
+    if (m_gameState == GameState::Playing && !m_commandBoxOpen && (keySym == 'm' || keySym == 'M')) {
+        m_renderer.toggleMoralRulesModal();
+        if (m_renderer.isMoralRulesModalOpen()) {
+            m_renderer.setChronicleOpen(false);
+            m_renderer.setFaithTreeOpen(false);
+            m_renderer.setMemoryTreeOpen(false);
+        }
+        return;
     }
 
     // Si la caja de comandos / trucos está abierta en partida
@@ -859,7 +1388,59 @@ void Game::onKeyPress(int keySym) {
         case 'a': case 'A': m_camera.pan(40, 0); break;
         case 'd': case 'D': m_camera.pan(-40, 0); break;
         case 'r': case 'R': m_camera.reset(m_map.getWidth(), m_map.getHeight()); break;
-        case 27: // ESC -> Guardar automáticamente estilo Minecraft y salir al Menú Principal
+        case 'z': case 'Z':
+            toggleDivinePowerTargeting(DivinePowerType::Lightning);
+            break;
+        case 'x': case 'X':
+            toggleDivinePowerTargeting(DivinePowerType::Plague);
+            break;
+        case 'v': case 'V':
+            toggleDivinePowerTargeting(DivinePowerType::Miracle);
+            break;
+        case 'c': case 'C':
+            castDivinePower(DivinePowerType::Congregate, 0, 0);
+            break;
+        case 't': case 'T':
+            toggleDivinePowerTargeting(DivinePowerType::Tornado);
+            break;
+        case 'g': case 'G':
+            toggleDivinePowerTargeting(DivinePowerType::Earthquake);
+            break;
+        case 'b': case 'B':
+            toggleDivinePowerTargeting(DivinePowerType::Pandemic);
+            break;
+        case 'm': case 'M':
+            toggleDivinePowerTargeting(DivinePowerType::Meteor);
+            break;
+        case 'k': case 'K':
+            toggleDivinePowerTargeting(DivinePowerType::Volcano);
+            break;
+        case 'f': case 'F':
+            toggleDivinePowerTargeting(DivinePowerType::Wildfire);
+            break;
+        case 'u': case 'U':
+            m_soundSystem.toggleMute();
+            showFeedback(m_soundSystem.isMuted() ? "AUDIO: SILENCIADO [Mute]" : "AUDIO: ACTIVADO", 2.5f);
+            break;
+        case '[': {
+            const float newVolume = std::max(0.0f, m_soundSystem.getMasterVolume() - 0.10f);
+            m_soundSystem.setMasterVolume(newVolume);
+            showFeedback("VOLUMEN: " + std::to_string(static_cast<int>(newVolume * 100)) + "%", 2.0f);
+            break;
+        }
+        case ']': {
+            const float newVolume = std::min(1.0f, m_soundSystem.getMasterVolume() + 0.10f);
+            m_soundSystem.setMasterVolume(newVolume);
+            showFeedback("VOLUMEN: " + std::to_string(static_cast<int>(newVolume * 100)) + "%", 2.0f);
+            break;
+        }
+        case 27: // ESC
+            if (m_activeDivinePower != DivinePowerType::Inactive) {
+                m_activeDivinePower = DivinePowerType::Inactive;
+                m_renderer.setActiveDivinePower(DivinePowerType::Inactive);
+                showFeedback("Modo apuntar cancelado.", 2.0f);
+                break;
+            }
             saveCurrentGame();
             m_gameState = GameState::MainMenu;
             break;
@@ -876,7 +1457,20 @@ void Game::executeCommand(const std::string& rawCmd) {
     }
     if (cmd.empty()) return;
 
-    if (cmd == "SELECTOR") {
+    if (cmd == "STATUS" || cmd == "DIAG" || cmd == "SALUD") {
+        const auto healthMetrics = ErrorSystem::instance().getHealthMetrics();
+        char healthStatusBuffer[128];
+        std::snprintf(healthStatusBuffer, sizeof(healthStatusBuffer),
+                      "SALUD SISTEMA: %.1f FPS (%.1fms) | RAM: %.1f MB | ENTIDADES: %u/%u | ESTADO: %s",
+                      healthMetrics.currentFps, healthMetrics.currentFrameTimeMs,
+                      healthMetrics.currentMemoryMb, healthMetrics.activeEntityCount,
+                      healthMetrics.maxSafeEntityLimit,
+                      healthMetrics.isUnderLagStress ? "LAG STRESS" : "OPTIMO");
+        showFeedback(healthStatusBuffer, 6.0f);
+    } else if (cmd == "PURGE" || cmd == "LIMPIAR") {
+        performEmergencyMemoryPurge();
+        showFeedback("PURGA DE MEMORIA EJECUTADA: CACHES Y CADAVERES COMPACTADOS CON EXITO", 5.0f);
+    } else if (cmd == "SELECTOR") {
         m_cheatSelectorActive = !m_cheatSelectorActive;
         if (m_cheatSelectorActive) {
             m_commandFeedback = "TRUCO 'SELECTOR' ACTIVADO: SELECCIONA CUALQUIER UNIDAD Y MUEVELA CON CLIC DERECHO";
@@ -897,8 +1491,35 @@ void Game::executeCommand(const std::string& rawCmd) {
                          ? "TRUCO 'LUMINUS' ACTIVADO: NIEBLA DE LA FE DISIPADA"
                          : "TRUCO 'LUMINUS' DESACTIVADO: LA NIEBLA DE LA FE REGRESA",
                      5.0f);
+    } else if (cmd == "DIA" || cmd == "DAY" || cmd == "MEDIODIA") {
+        m_dayNightCycle.setTimeByHour(12.0f);
+        showFeedback("CICLO DIURNO: FIJADO A MEDIODIA (12:00) - PLENA ILUMINACION SOLAR", 4.0f);
+    } else if (cmd == "NOCHE" || cmd == "NIGHT") {
+        m_dayNightCycle.setTimeByHour(23.0f);
+        showFeedback("CICLO DIURNO: FIJADO A NOCHE (23:00) - LUNA Y LUCES DINAMICAS", 4.0f);
+    } else if (cmd == "AMANECER" || cmd == "DAWN") {
+        m_dayNightCycle.setTimeByHour(6.5f);
+        showFeedback("CICLO DIURNO: FIJADO A AMANECER (06:30) - AURORA Y RESPLANDOR DORADO", 4.0f);
+    } else if (cmd == "ATARDECER" || cmd == "DUSK" || cmd == "OCASO") {
+        m_dayNightCycle.setTimeByHour(18.5f);
+        showFeedback("CICLO DIURNO: FIJADO A ATARDECER (18:30) - CREPUSCULO Y HOGUERAS", 4.0f);
+    } else if (cmd == "METEORITO" || cmd == "METEORO" || cmd == "METEOR") {
+        toggleDivinePowerTargeting(DivinePowerType::Meteor);
+        showFeedback("MODO APUNTAR: METEORITO CATACLYSMICO ACTIVADO", 4.0f);
+    } else if (cmd == "VOLCAN" || cmd == "VOLCANO" || cmd == "ERUPCION" || cmd == "MAGMA") {
+        toggleDivinePowerTargeting(DivinePowerType::Volcano);
+        showFeedback("MODO APUNTAR: ERUPCIÓN VOLCÁNICA ACTIVADA", 4.0f);
+    } else if (cmd == "INCENDIO" || cmd == "FUEGO" || cmd == "WILDFIRE" || cmd == "FIRE") {
+        toggleDivinePowerTargeting(DivinePowerType::Wildfire);
+        showFeedback("MODO APUNTAR: INCENDIO FORESTAL ACTIVADO", 4.0f);
+    } else if (cmd == "MUTE" || cmd == "SILENCIO") {
+        m_soundSystem.toggleMute();
+        showFeedback(m_soundSystem.isMuted() ? "AUDIO: SILENCIADO [Mute]" : "AUDIO: ACTIVADO", 4.0f);
+    } else if (cmd == "SONIDO" || cmd == "AUDIO") {
+        showFeedback("DISPOSITIVO DE SONIDO: " + m_soundSystem.getDeviceName() + " | VOL: " +
+                     std::to_string(static_cast<int>(m_soundSystem.getMasterVolume() * 100)) + "%", 4.0f);
     } else {
-        showFeedback("COMANDO DESCONOCIDO: '" + cmd + "' (USA: SELECTOR | LUMINUS)", 4.0f);
+        showFeedback("COMANDO DESCONOCIDO: '" + cmd + "' (USA: SELECTOR | LUMINUS | DIA | NOCHE | AMANECER | ATARDECER | METEORITO | VOLCAN | MUTE | AUDIO)", 4.0f);
     }
 }
 
@@ -908,10 +1529,12 @@ void Game::showFeedback(const std::string& msg, float seconds) {
     std::cout << "[Comando] " << msg << std::endl;
 }
 
+// EN: Resolve the player religion ID by matching the configured religion name
+// ES: Resolver el ID de la religión del jugador buscando el nombre configurado
 int Game::resolvePlayerReligionId() const {
-    for (const auto& r : m_registry.getAllReligions()) {
-        if (r.name == m_creationConfig.religionName) {
-            return r.id;
+    for (const auto& religionEntry : m_registry.getAllReligions()) {
+        if (religionEntry.name == m_creationConfig.religionName) {
+            return religionEntry.id;
         }
     }
     return PLAYER_RELIGION_ID;
@@ -958,13 +1581,15 @@ void Game::focusCameraOnPlayerFaith() {
         }
     }
 
-    for (int y = 0; y < m_map.getHeight(); ++y) {
-        for (int x = 0; x < m_map.getWidth(); ++x) {
-            const Cell& c = m_map.getCell(x, y);
-            int hsRel = (c.holySiteReligionId > 0) ? c.holySiteReligionId : c.dominantReligionId;
-            if (c.hasHolySite && hsRel == rel) {
-                m_camera.centerOnCell(x, y, m_map.getWidth(), m_map.getHeight());
-                selectCell(x, y);
+    // EN: Search for holy site of player religion if no villagers found
+    // ES: Buscar el sitio sagrado de la religión del jugador si no se hallan aldeanos
+    for (int cellY = 0; cellY < m_map.getHeight(); ++cellY) {
+        for (int cellX = 0; cellX < m_map.getWidth(); ++cellX) {
+            const Cell& candidateCell = m_map.getCell(cellX, cellY);
+            const int holySiteReligion = (candidateCell.holySiteReligionId > 0) ? candidateCell.holySiteReligionId : candidateCell.dominantReligionId;
+            if (candidateCell.hasHolySite && holySiteReligion == rel) {
+                m_camera.centerOnCell(cellX, cellY, m_map.getWidth(), m_map.getHeight());
+                selectCell(cellX, cellY);
                 return;
             }
         }
@@ -1089,19 +1714,76 @@ void Game::handleWindowEvents() {
 
 void Game::run() {
     auto lastTime = std::chrono::high_resolution_clock::now();
+    uint32_t frameCounter = 0;
 
     while (m_isRunning) {
         auto now = std::chrono::high_resolution_clock::now();
-        float dt = std::chrono::duration<float>(now - lastTime).count();
+        float rawDt = std::chrono::duration<float>(now - lastTime).count();
         lastTime = now;
-        dt = std::min(dt, 0.1f); // Cap dt
+
+        // EN: Clamp delta time through ErrorSystem to strictly prevent the simulation spiral of death
+        // ES: Limitar el delta time mediante ErrorSystem para evitar la espiral de la muerte
+        float dt = ErrorSystem::instance().clampDeltaTime(rawDt);
 
         handleWindowEvents();
         update(dt);
         render();
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(16)); // ~60 FPS
+        auto frameEndTime = std::chrono::high_resolution_clock::now();
+        float frameDurationMs = std::chrono::duration<float, std::milli>(frameEndTime - now).count();
+
+        // EN: Report frame timing to the lag detector
+        // ES: Informar el tiempo de fotograma al detector de lag
+        ErrorSystem::instance().reportFrameTime(frameDurationMs);
+
+        // EN: Periodic memory auditing and leak prevention (every 60 frames)
+        // ES: Auditoría periódica de memoria y prevención de fugas (cada 60 fotogramas)
+        if (++frameCounter % 60 == 0) {
+            ErrorSystem::instance().auditMemoryUsage();
+            if (ErrorSystem::instance().shouldTriggerEmergencyPurge()) {
+                performEmergencyMemoryPurge();
+                ErrorSystem::instance().acknowledgeEmergencyPurge();
+            }
+        }
+
+        auto frameElapsed = std::chrono::duration_cast<std::chrono::microseconds>(frameEndTime - now);
+        constexpr auto targetFrameDuration = std::chrono::microseconds(16666); // 60 FPS
+        if (frameElapsed < targetFrameDuration) {
+            std::this_thread::sleep_for(targetFrameDuration - frameElapsed);
+        }
     }
+}
+
+// =============================================================================
+// EN: Emergency memory purge - trims bloated caches when RAM reaches critical levels
+// ES: Purga de emergencia de memoria - poda cachés infladas si la RAM llega a niveles críticos
+// =============================================================================
+void Game::performEmergencyMemoryPurge() {
+    std::cout << "[Game:EmergencyPurge] Executing emergency memory compacting..." << std::endl;
+
+    // EN: 1. Trim historical timeline snapshots to essential baseline
+    // ES: 1. Podar las capturas históricas de la línea de tiempo a un mínimo esencial
+    m_timeline.trimHistory(100);
+
+    // EN: 2. Prune old deceased entities whose decay timers have elapsed
+    // ES: 2. Purgar entidades fallecidas cuyos temporizadores de muerte hayan concluido
+    auto& villagers = m_gestorHumanos.getHumanos();
+    villagers.erase(
+        std::remove_if(villagers.begin(), villagers.end(), [](const Humano& villager) {
+            return villager.getSalud() <= 0.0f;
+        }),
+        villagers.end()
+    );
+
+    // EN: 3. Audit updated entity count in ErrorSystem
+    // ES: 3. Auditar el conteo de entidades actualizado en ErrorSystem
+    ErrorSystem::instance().updateEntityCount(static_cast<uint32_t>(villagers.size()));
+
+    // EN: 4. Re-audit memory usage post-purge
+    // ES: 4. Reauditar el consumo de memoria tras la purga
+    float postPurgeMemoryMb = ErrorSystem::instance().auditMemoryUsage();
+    std::cout << "[Game:EmergencyPurge] Purge complete. Resident RAM: "
+              << postPurgeMemoryMb << " MB." << std::endl;
 }
 
 void Game::startNewCustomWorld() {
@@ -1111,21 +1793,24 @@ void Game::startNewCustomWorld() {
     std::cout << "  - Religión Elegida: " << m_creationConfig.religionName << std::endl;
     std::cout << "  - Semilla (Seed): " << m_creationConfig.mapSeed << std::endl;
     std::cout << "  - Población Inicial: " << m_creationConfig.initialPopulation << std::endl;
+    std::cout << "  - Recursos Iniciales: " << m_creationConfig.initialResources << " (Comida/Materiales)" << std::endl;
     std::cout << "  - Época de Inicio: Era " << static_cast<int>(m_creationConfig.startingEra) << std::endl;
     std::cout << "  - Cofre Sagrado: " << (m_creationConfig.starterChest ? "ACTIVADO" : "DESACTIVADO") << std::endl;
     std::cout << "==========================================================" << std::endl;
 
-    // 1. Determinar tamaño de mapa
+    // 1. Determinar tamaño de mapa y generar geografía procedimental adaptada al Clima y Abundancia elegidos
     int mapDim = (m_creationConfig.mapSizeIndex == 0) ? 32 : (m_creationConfig.mapSizeIndex == 2 ? 64 : 48);
     m_map = WorldMap(mapDim, mapDim);
-    m_map.generateProceduralWorld(m_creationConfig.mapSeed);
+    m_map.generateProceduralWorld(m_creationConfig.mapSeed, m_creationConfig.worldClimate, m_creationConfig.resourceAbundance);
+    m_cloudSystem.reset(mapDim, mapDim);
+    m_renderer.setCloudSystem(&m_cloudSystem);
 
-    // Ajustar población total de las celdas según la población inicial solicitada (escala 1:1 con aldeanos reales)
-    // Inicialmente reseteamos la población de celdas a 0 para que cada aldeano real instanciado sume 1
-    for (int y = 0; y < mapDim; ++y) {
-        for (int x = 0; x < mapDim; ++x) {
-            Cell& c = m_map.getCell(x, y);
-            c.population = 0;
+    // EN: Reset cell populations to 0 so instantiated living units increment counts 1:1
+    // ES: Reiniciar la población de celdas a 0 para que cada aldeano real instanciado sume 1:1
+    for (int cellY = 0; cellY < mapDim; ++cellY) {
+        for (int cellX = 0; cellX < mapDim; ++cellX) {
+            Cell& targetCell = m_map.getCell(cellX, cellY);
+            targetCell.population = 0;
         }
     }
 
@@ -1145,6 +1830,8 @@ void Game::startNewCustomWorld() {
 
     m_registry = ReligionRegistry{};
     m_timeline.reset(startYear, 2200);
+    float yearsPerSec = (m_creationConfig.timePacing == TimePacing::Epico) ? 1.0f : ((m_creationConfig.timePacing == TimePacing::Dinamico) ? 12.0f : 4.0f);
+    m_timeline.setYearsPerSecond(yearsPerSec);
     m_timeEngine.reset(startYear);
 
     // Paleta de colores
@@ -1168,18 +1855,22 @@ void Game::startNewCustomWorld() {
     Religion* pRel = m_registry.getReligion(playerRelId);
     if (pRel) {
         pRel->currentEra = m_creationConfig.startingEra;
+        pRel->resources.food = m_creationConfig.initialResources;
+        pRel->resources.wood = std::max(50, m_creationConfig.initialResources * 6 / 10);
+        pRel->resources.stone = std::max(30, m_creationConfig.initialResources * 3 / 10);
+        pRel->resources.gold = std::max(10, m_creationConfig.initialResources * 1 / 10);
         if (m_creationConfig.starterChest) {
             pRel->theologyPoints += 1000;
             pRel->spiritualPiety = 0.95f;
             pRel->zeal = 0.85f;
+            pRel->resources.food += 200;
+            pRel->resources.gold += 50;
         }
     }
 
-    // 4. Crear 4 religiones rivales (con dificultad adaptada)
-    float rivalZeal = 0.5f;
-    if (m_creationConfig.aiDifficulty == AIDifficulty::Facil) rivalZeal = 0.35f;
-    else if (m_creationConfig.aiDifficulty == AIDifficulty::Dificil) rivalZeal = 0.75f;
-    else if (m_creationConfig.aiDifficulty == AIDifficulty::Pesadilla) rivalZeal = 0.95f;
+    // 4. Crear 4 religiones rivales con equidad estadística (0% trampas ni ventajas numéricas).
+    // La dificultad radica estrictamente en la sofisticación de decisiones e inteligencia de la IA.
+    const float rivalZeal = 0.5f;
 
     struct RivalDef { const char* name; const char* founder; ColorRGB color; const char* symbol; };
     RivalDef rivals[4] = {
@@ -1190,74 +1881,122 @@ void Game::startNewCustomWorld() {
     };
 
     int rivalIds[4];
-    for (int i = 0; i < 4; ++i) {
-        rivalIds[i] = m_registry.createPrimordialReligion(
-            rivals[i].name, rivals[i].founder, rivals[i].color, rivals[i].symbol, startYear
+    for (int rivalIndex = 0; rivalIndex < 4; ++rivalIndex) {
+        rivalIds[rivalIndex] = m_registry.createPrimordialReligion(
+            rivals[rivalIndex].name, rivals[rivalIndex].founder, rivals[rivalIndex].color, rivals[rivalIndex].symbol, startYear
         );
-        Religion* r = m_registry.getReligion(rivalIds[i]);
-        if (r) {
-            r->currentEra = m_creationConfig.startingEra;
-            r->zeal = rivalZeal;
+        Religion* rivalRelPtr = m_registry.getReligion(rivalIds[rivalIndex]);
+        if (rivalRelPtr) {
+            rivalRelPtr->currentEra = m_creationConfig.startingEra;
+            rivalRelPtr->zeal = rivalZeal;
+            rivalRelPtr->resources.food = m_creationConfig.initialResources;
+            rivalRelPtr->resources.wood = std::max(50, m_creationConfig.initialResources * 6 / 10);
+            rivalRelPtr->resources.stone = std::max(30, m_creationConfig.initialResources * 3 / 10);
+            rivalRelPtr->resources.gold = std::max(10, m_creationConfig.initialResources * 1 / 10);
         }
     }
 
-    // 5. Sembrar templos y creyentes en el mapa
-    std::vector<Point2i> fertileLocations;
-    for (int y = 5; y < mapDim - 5; ++y) {
-        for (int x = 5; x < mapDim - 5; ++x) {
-            const Cell& c = m_map.getCell(x, y);
-            if (c.biome == BiomeType::FertileValley || c.biome == BiomeType::CoastalPlains) {
-                fertileLocations.push_back({x, y});
+    // 5. Asignación espacial procedimental de pueblos con dispersión aleatoria y límites de distancia
+    // EN: Procedural spatial assignment of settlements with random dispersion and distance margins
+    // ES: Asignación espacial procedimental de pueblos con dispersión aleatoria y límites de distancia
+    std::vector<Point2i> puebloLocations = m_map.generatePuebloLocations(5, m_creationConfig.mapSeed);
+    Point2i playerHearth{mapDim / 2, mapDim / 2};
+
+    if (puebloLocations.size() >= 5) {
+        playerHearth = puebloLocations[0];
+
+        // EN: Consecrate the player settlement hearth
+        // ES: Consagrar el asentamiento del Jugador
+        Cell& playerHearthCell = m_map.getCell(playerHearth.x, playerHearth.y);
+        playerHearthCell.setShare(playerRelId, 0.98f);
+        playerHearthCell.devotion = 0.95f;
+        m_map.consecrateHolySite(playerHearth.x, playerHearth.y, "Santuario Sagrado de " + m_creationConfig.godName);
+        playerHearthCell.shrineLevel = m_creationConfig.starterChest ? 3 : 2;
+
+        // EN: Consecrate player local territory (radius 2)
+        // ES: Consagrar la comarca local del Jugador (radio 2 de soberanía territorial)
+        for (int deltaCellY = -2; deltaCellY <= 2; ++deltaCellY) {
+            for (int deltaCellX = -2; deltaCellX <= 2; ++deltaCellX) {
+                int neighborCellX = playerHearth.x + deltaCellX;
+                int neighborCellY = playerHearth.y + deltaCellY;
+                float distance = std::sqrt(static_cast<float>(deltaCellX * deltaCellX + deltaCellY * deltaCellY));
+                if (m_map.isValid(neighborCellX, neighborCellY) && distance <= 2.5f && (deltaCellX != 0 || deltaCellY != 0)) {
+                    Cell& neighborCell = m_map.getCell(neighborCellX, neighborCellY);
+                    if (neighborCell.isHabitable()) {
+                        float share = std::max(0.60f, 0.90f - distance * 0.12f);
+                        neighborCell.setShare(playerRelId, share);
+                        neighborCell.devotion = std::max(0.55f, 0.85f - distance * 0.12f);
+                    }
+                }
             }
         }
-    }
 
-    if (!fertileLocations.empty()) {
-        // Asignar el hogar central al Jugador
-        size_t centerIdx = fertileLocations.size() / 2;
-        Point2i playerHearth = fertileLocations[centerIdx];
-        Cell& c = m_map.getCell(playerHearth.x, playerHearth.y);
-        c.setShare(playerRelId, 0.98f);
-        c.devotion = 0.95f;
-        m_map.consecrateHolySite(playerHearth.x, playerHearth.y, "Santuario Sagrado de " + m_creationConfig.godName);
-        c.shrineLevel = m_creationConfig.starterChest ? 3 : 2;
+        // EN: Consecrate the 4 rival settlements across their territories
+        // ES: Consagrar los 4 pueblos rivales en sus respectivos territorios distantes
+        for (int rivalIndex = 0; rivalIndex < 4; ++rivalIndex) {
+            Point2i rivalHearth = puebloLocations[rivalIndex + 1];
+            Cell& rivalHearthCell = m_map.getCell(rivalHearth.x, rivalHearth.y);
+            rivalHearthCell.setShare(rivalIds[rivalIndex], 0.95f);
+            rivalHearthCell.devotion = 0.90f;
+            m_map.consecrateHolySite(rivalHearth.x, rivalHearth.y, "Templo Arcano de " + std::string(rivals[rivalIndex].founder));
+            rivalHearthCell.shrineLevel = 2;
 
-        // Sembrar rivales en los 4 cuadrantes alrededor
-        int step = std::max(1, static_cast<int>(fertileLocations.size()) / 5);
-        const int rivalSlots[4] = {0, 1, 3, 4};
-        for (int i = 0; i < 4; ++i) {
-            size_t idx = std::min(static_cast<size_t>(rivalSlots[i] * step), fertileLocations.size() - 1);
-            if (idx == centerIdx && idx + 1 < fertileLocations.size()) idx++;
-            Point2i pt = fertileLocations[idx];
-            Cell& rc = m_map.getCell(pt.x, pt.y);
-            rc.setShare(rivalIds[i], 0.90f);
-            rc.devotion = 0.85f;
-            m_map.consecrateHolySite(pt.x, pt.y, "Templo Arcano de " + std::string(rivals[i].founder));
-            rc.shrineLevel = 2;
+            // EN: Consecrate rival local territory (radius 2)
+            // ES: Consagrar la comarca local del rival (radio 2)
+            for (int deltaCellY = -2; deltaCellY <= 2; ++deltaCellY) {
+                for (int deltaCellX = -2; deltaCellX <= 2; ++deltaCellX) {
+                    int neighborCellX = rivalHearth.x + deltaCellX;
+                    int neighborCellY = rivalHearth.y + deltaCellY;
+                    float distance = std::sqrt(static_cast<float>(deltaCellX * deltaCellX + deltaCellY * deltaCellY));
+                    if (m_map.isValid(neighborCellX, neighborCellY) && distance <= 2.5f && (deltaCellX != 0 || deltaCellY != 0)) {
+                        Cell& neighborCell = m_map.getCell(neighborCellX, neighborCellY);
+                        if (neighborCell.isHabitable()) {
+                            float share = std::max(0.60f, 0.90f - distance * 0.12f);
+                            neighborCell.setShare(rivalIds[rivalIndex], share);
+                            neighborCell.devotion = std::max(0.55f, 0.85f - distance * 0.12f);
+                        }
+                    }
+                }
+            }
         }
     }
 
     m_map.recalculateReligions(m_registry);
     m_camera.reset(m_map.getWidth(), m_map.getHeight());
+    m_camera.centerOnCell(playerHearth.x, playerHearth.y, m_map.getWidth(), m_map.getHeight());
+    selectCell(playerHearth.x, playerHearth.y);
 
     // 6. Inicializar población humana de aldeanos sobre el mapa (1 aldeano real = 1 habitante)
     m_gestorHumanos.inicializarPoblacion(m_map, m_registry, m_creationConfig.initialPopulation);
+    m_gestorHumanos.setAIDifficulty(m_creationConfig.aiDifficulty);
+    m_gestorHumanos.setTribalBelligerence(m_creationConfig.tribalBelligerence);
+    m_replication.setAIDifficulty(m_creationConfig.aiDifficulty);
+    m_replication.setTribalBelligerence(m_creationConfig.tribalBelligerence);
     m_map.recalculateReligions(m_registry);
 
     if (const Humano* selChaman = m_gestorHumanos.getHumanoSeleccionado()) {
         selectCell(selChaman->getCeldaX(), selChaman->getCeldaY());
+        m_camera.centerOnCell(selChaman->getCeldaX(), selChaman->getCeldaY(), m_map.getWidth(), m_map.getHeight());
     }
 
     initFaithFog(playerRelId);
+    m_moralitySystem.getOrCreateProfile(playerRelId);
+    m_buildingSystem.clear();
+    m_renderer.setBuildingSystem(&m_buildingSystem);
 
-    // Registrar evento inicial de la epopeya
+    // Registrar evento inicial de la epopeya (Punto de Quiebre Fundacional)
     m_eventLine.addEvent(
         startYear, EventCategory::BirthOfReligion,
         "Manifestacion Divina de " + m_creationConfig.godName,
         "El Dios " + m_creationConfig.godName + " ha establecido su pacto eterno fundando " +
         m_creationConfig.religionName + (m_creationConfig.starterChest ? " con el bendito Cofre Sagrado." : "."),
-        {mapDim / 2, mapDim / 2}, playerRelId, 0, playerColor
+        {playerHearth.x, playerHearth.y}, playerRelId, 0, playerColor,
+        true, m_creationConfig.godName, "Pacto sagrado eterno y genesis de tu civilizacion"
     );
+
+    m_gameOverTriggered = false;
+    m_gameOverTimer = 0.0f;
+    m_extinctionYear = startYear;
 
     // Cambiar estado a Playing
     m_gameState = GameState::Playing;
@@ -1282,65 +2021,69 @@ void Game::loadStateFromSave(const WorldMap& map, const ReligionRegistry& regist
 
     m_camera.reset(m_map.getWidth(), m_map.getHeight());
 
-    // Normalizar maxPopulation y elevaciones cohesivas para partidas guardadas
-    for (int y = 0; y < m_map.getHeight(); ++y) {
-        for (int x = 0; x < m_map.getWidth(); ++x) {
-            Cell& c = m_map.getCell(x, y);
-            if (c.isWater()) {
-                c.elevation = 0.0f;
-            } else if (c.biome == BiomeType::RuggedMountains) {
-                // Convertir antiguas losas grises centrales en colinas verdes habitables
-                c.biome = ((x + y) % 3 == 0) ? BiomeType::HighlandHills : BiomeType::FertileValley;
-                c.elevation = (c.biome == BiomeType::HighlandHills) ? 0.95f : 0.50f;
-                c.maxPopulation = 6;
-            } else if (c.biome == BiomeType::HighlandHills) {
-                c.elevation = 0.95f;
+    // EN: Normalize max population and cohesive elevations for saved games
+    // ES: Normalizar maxPopulation y elevaciones cohesivas para partidas guardadas
+    for (int cellY = 0; cellY < m_map.getHeight(); ++cellY) {
+        for (int cellX = 0; cellX < m_map.getWidth(); ++cellX) {
+            Cell& targetCell = m_map.getCell(cellX, cellY);
+            if (targetCell.isWater()) {
+                targetCell.elevation = 0.0f;
+            } else if (targetCell.biome == BiomeType::RuggedMountains) {
+                // EN: Convert ancient central gray slabs into habitable green hills
+                // ES: Convertir antiguas losas grises centrales en colinas verdes habitables
+                targetCell.biome = ((cellX + cellY) % 3 == 0) ? BiomeType::HighlandHills : BiomeType::FertileValley;
+                targetCell.elevation = (targetCell.biome == BiomeType::HighlandHills) ? 0.95f : 0.50f;
+                targetCell.maxPopulation = 6;
+            } else if (targetCell.biome == BiomeType::HighlandHills) {
+                targetCell.elevation = 0.95f;
             } else {
-                c.elevation = 0.50f;
+                targetCell.elevation = 0.50f;
             }
-            if (c.isHabitable() && c.maxPopulation > 15) {
-                c.maxPopulation = 6;
+            if (targetCell.isHabitable() && targetCell.maxPopulation > 15) {
+                targetCell.maxPopulation = 6;
             }
         }
     }
 
     int totalSavedPop = m_map.getTotalWorldPopulation();
     if (totalSavedPop > 250 || totalSavedPop <= 0) {
-        // Migrar partidas antiguas (ej. 600,000 hab) a 80 aldeanos reales 1:1 para evitar colapso
+        // EN: Migrate ancient saves (e.g. 600,000 pop) to 80 real 1:1 villagers to avoid collapse
+        // ES: Migrar partidas antiguas (ej. 600,000 hab) a 80 aldeanos reales 1:1 para evitar colapso
         m_gestorHumanos.inicializarPoblacion(m_map, m_registry, 80);
     } else {
-        // Restaurar aldeanos reales 1:1 en cada celda poblada según el mapa guardado
+        // EN: Restore real 1:1 villagers in each populated cell according to the saved map
+        // ES: Restaurar aldeanos reales 1:1 en cada celda poblada según el mapa guardado
         m_gestorHumanos.getHumanos().clear();
         std::map<int, bool> hasShamanForRel;
         static const char* NOMBRES_CHAMAN[6] = {
             "Chaman Arandu", "Chaman Arandu", "Chaman Khep",
             "Chaman Orph", "Chaman Mithra", "Chaman Dharma"
         };
-        int sId = 1;
+        int nextVillagerId = 1;
         int firstShamanId = -1;
-        for (int y = 0; y < m_map.getHeight(); ++y) {
-            for (int x = 0; x < m_map.getWidth(); ++x) {
-                Cell& c = m_map.getCell(x, y);
-                int count = std::clamp(c.population, 0, 10);
-                c.population = count;
-                for (int p = 0; p < count; ++p) {
-                    float offX = 0.25f + 0.15f * static_cast<float>(p % 3);
-                    float offY = 0.25f + 0.15f * static_cast<float>((p / 3) % 3);
-                    int curId = sId++;
-                    int relId = (c.dominantReligionId > 0) ? c.dominantReligionId : 1;
-                    bool makeShaman = !hasShamanForRel[relId];
-                    std::string hName = makeShaman
-                        ? std::string(NOMBRES_CHAMAN[std::clamp(relId, 0, 5)])
-                        : ("Grog #" + std::to_string(curId));
-                    Humano h(curId, hName, static_cast<float>(x) + offX, static_cast<float>(y) + offY);
-                    h.setEsChaman(makeShaman);
-                    h.setReligionId(relId);
-                    h.setDevocion(makeShaman ? 0.98f : c.devotion);
+        for (int cellY = 0; cellY < m_map.getHeight(); ++cellY) {
+            for (int cellX = 0; cellX < m_map.getWidth(); ++cellX) {
+                Cell& targetCell = m_map.getCell(cellX, cellY);
+                int count = std::clamp(targetCell.population, 0, 10);
+                targetCell.population = count;
+                for (int villagerIndex = 0; villagerIndex < count; ++villagerIndex) {
+                    float subOffsetX = 0.25f + 0.15f * static_cast<float>(villagerIndex % 3);
+                    float subOffsetY = 0.25f + 0.15f * static_cast<float>((villagerIndex / 3) % 3);
+                    int currentVillagerId = nextVillagerId++;
+                    int religionId = (targetCell.dominantReligionId > 0) ? targetCell.dominantReligionId : 1;
+                    bool makeShaman = !hasShamanForRel[religionId];
+                    std::string unitName = makeShaman
+                        ? std::string(NOMBRES_CHAMAN[std::clamp(religionId, 0, 5)])
+                        : ("Grog #" + std::to_string(currentVillagerId));
+                    Humano newVillager(currentVillagerId, unitName, static_cast<float>(cellX) + subOffsetX, static_cast<float>(cellY) + subOffsetY);
+                    newVillager.setEsChaman(makeShaman);
+                    newVillager.setReligionId(religionId);
+                    newVillager.setDevocion(makeShaman ? 0.98f : targetCell.devotion);
                     if (makeShaman) {
-                        hasShamanForRel[relId] = true;
-                        if (relId == 1 || firstShamanId < 0) firstShamanId = curId;
+                        hasShamanForRel[religionId] = true;
+                        if (religionId == 1 || firstShamanId < 0) firstShamanId = currentVillagerId;
                     }
-                    m_gestorHumanos.agregarHumano(h);
+                    m_gestorHumanos.agregarHumano(newVillager);
                 }
             }
         }
@@ -1352,6 +2095,12 @@ void Game::loadStateFromSave(const WorldMap& map, const ReligionRegistry& regist
     m_map.recalculateReligions(m_registry);
 
     initFaithFog(resolvePlayerReligionId());
+    m_buildingSystem.clear();
+    m_renderer.setBuildingSystem(&m_buildingSystem);
+
+    m_gameOverTriggered = false;
+    m_gameOverTimer = 0.0f;
+    m_extinctionYear = currentYear;
 
     m_gameState = GameState::Playing;
     saveCurrentGame();
@@ -1361,8 +2110,8 @@ void Game::saveCurrentGame(const std::string& slotName) {
     std::string folder = slotName;
     if (folder.empty()) {
         std::string safeGod = m_creationConfig.godName;
-        for (char& c : safeGod) {
-            if (!std::isalnum(static_cast<unsigned char>(c))) c = '_';
+        for (char& charElem : safeGod) {
+            if (!std::isalnum(static_cast<unsigned char>(charElem))) charElem = '_';
         }
         folder = "Mundo_" + safeGod + "_" + std::to_string(m_creationConfig.mapSeed);
     }
@@ -1375,10 +2124,10 @@ void Game::runHeadless(int maxTicks, const std::string& exportPPM) {
     }
     m_gameState = GameState::Playing;
     std::cout << "[Simulator] Running headless simulation for " << maxTicks << " steps..." << std::endl;
-    float dt = 0.2f;
+    float deltaSimulationTime = 0.2f;
 
-    for (int i = 0; i < maxTicks; ++i) {
-        update(dt);
+    for (int tickIndex = 0; tickIndex < maxTicks; ++tickIndex) {
+        update(deltaSimulationTime);
     }
 
     render();
@@ -1393,11 +2142,11 @@ void Game::runHeadless(int maxTicks, const std::string& exportPPM) {
     std::cout << "[Simulator] Simulation completed. Final Year: "
               << Timeline::formatYear(m_timeline.getCurrentYear()) << std::endl;
     std::cout << "[Simulator] Total Religions active: " << m_registry.getAllReligions().size() << std::endl;
-    for (const auto& r : m_registry.getAllReligions()) {
-        std::cout << "  - " << r.name << " (" << r.symbol << ") Followers: "
-                  << r.totalFollowers << " Dominant Cells: " << r.totalCellsDominant
-                  << " Era: " << AdvancementSystem::getEraName(r.currentEra)
-                  << (r.isExtinct ? " [EXTINCT]" : "") << std::endl;
+    for (const auto& religionEntry : m_registry.getAllReligions()) {
+        std::cout << "  - " << religionEntry.name << " (" << religionEntry.symbol << ") Followers: "
+                  << religionEntry.totalFollowers << " Dominant Cells: " << religionEntry.totalCellsDominant
+                  << " Era: " << AdvancementSystem::getEraName(religionEntry.currentEra)
+                  << (religionEntry.isExtinct ? " [EXTINCT]" : "") << std::endl;
     }
 }
 

@@ -19,7 +19,9 @@ void EventLine::addEvent(const GameEvent& ev) {
 
 void EventLine::addEvent(int year, EventCategory cat, const std::string& title,
                         const std::string& desc, const Point2i& loc,
-                        int relA, int relB, ColorRGB color) {
+                        int relA, int relB, ColorRGB color,
+                        bool isTurningPoint, const std::string& actor,
+                        const std::string& consequence) {
     GameEvent ev;
     ev.year = year;
     ev.category = cat;
@@ -29,6 +31,9 @@ void EventLine::addEvent(int year, EventCategory cat, const std::string& title,
     ev.religionAId = relA;
     ev.religionBId = relB;
     ev.badgeColor = color;
+    ev.isTurningPoint = isTurningPoint;
+    ev.actorName = actor;
+    ev.consequence = consequence;
     addEvent(ev);
 }
 
@@ -66,6 +71,55 @@ std::vector<GameEvent> EventLine::getEventsForYearRange(int startYear, int endYe
     std::vector<GameEvent> result;
     for (const auto& ev : m_events) {
         if (ev.year >= startYear && ev.year <= endYear) {
+            result.push_back(ev);
+        }
+    }
+    return result;
+}
+
+std::vector<GameEvent> EventLine::getTurningPoints() const {
+    std::vector<GameEvent> result;
+    for (const auto& ev : m_events) {
+        if (ev.isTurningPoint) {
+            result.push_back(ev);
+        }
+    }
+    return result;
+}
+
+std::vector<GameEvent> EventLine::getFilteredEvents(int filterIndex) const {
+    if (filterIndex == 0) {
+        return m_events; // Todos
+    }
+    if (filterIndex == 1) {
+        return getTurningPoints(); // Puntos de quiebre
+    }
+
+    std::vector<GameEvent> result;
+    for (const auto& ev : m_events) {
+        bool match = false;
+        switch (filterIndex) {
+            case 2: // Pérdidas y Conflictos
+                match = (ev.category == EventCategory::MajorLoss || ev.category == EventCategory::Extinction ||
+                         ev.category == EventCategory::BorderConflict);
+                break;
+            case 3: // Avances
+                match = (ev.category == EventCategory::EraAdvancement || ev.category == EventCategory::HolySiteErected);
+                break;
+            case 4: // Descubrimientos
+                match = (ev.category == EventCategory::Discovery || ev.category == EventCategory::PilgrimageWave);
+                break;
+            case 5: // Cismas
+                match = (ev.category == EventCategory::DoctrinalSchism || ev.category == EventCategory::ReligiousReformation);
+                break;
+            case 6: // Sincretismo y Alianzas
+                match = (ev.category == EventCategory::SyncreticAgglutination || ev.category == EventCategory::ExogamicPact);
+                break;
+            default:
+                match = true;
+                break;
+        }
+        if (match) {
             result.push_back(ev);
         }
     }

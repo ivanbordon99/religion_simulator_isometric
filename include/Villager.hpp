@@ -18,13 +18,6 @@ enum class VillagerActivity {
     Greeting
 };
 
-enum class IsoDirection {
-    SW,
-    SE,
-    NE,
-    NW
-};
-
 struct Villager {
     int id{0};
     std::string name{"Grog"};

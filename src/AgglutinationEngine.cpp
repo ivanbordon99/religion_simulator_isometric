@@ -94,9 +94,12 @@ void AgglutinationEngine::checkSyncreticAgglutination(WorldMap& map, ReligionReg
                         ev.religionAId = r1;
                         ev.religionBId = r2;
                         ev.badgeColor = newRel->color;
-                        ev.title = "Syncretic Agglutination: " + newRel->name;
-                        ev.description = "Prolonged contact between " + rel1->name + " and " + rel2->name +
-                                         " has birthed a unified syncretic communion: " + newRel->name + "!";
+                        ev.title = "Fusion Sincretista: " + newRel->name;
+                        ev.description = "El contacto sagrado prolongado entre " + rel1->name + " y " + rel2->name +
+                                         " ha engendrado una comunion espiritual hibrida y unificada: " + newRel->name + "!";
+                        ev.isTurningPoint = true;
+                        ev.actorName = "Fieles de " + rel1->name + " y " + rel2->name;
+                        ev.consequence = "Nacimiento de dogma sincretico y unificacion de linajes";
                         outEvents.push_back(ev);
                         return; // One major agglutination per check
                     }
@@ -182,9 +185,12 @@ void AgglutinationEngine::checkDoctrinalSchisms(WorldMap& map, ReligionRegistry&
                         ev.religionAId = r.id;
                         ev.religionBId = schismId;
                         ev.badgeColor = schismRel->color;
-                        ev.title = "Doctrinal Schism in " + r.name;
-                        ev.description = "Prophet " + schismRel->founderName + " has proclaimed the reformation, founding " +
-                                         schismRel->name + " in defiance of orthodoxy!";
+                        ev.title = "Cisma Doctrinal en " + r.name;
+                        ev.description = "El profeta " + schismRel->founderName + " ha proclamado la herejia reformista, fundando " +
+                                         schismRel->name + " en desafio a la ortodoxia ancestral.";
+                        ev.isTurningPoint = true;
+                        ev.actorName = schismRel->founderName;
+                        ev.consequence = "Fractura teologica y dispersion de fieles";
                         outEvents.push_back(ev);
                         return; // One schism per check cycle
                     }

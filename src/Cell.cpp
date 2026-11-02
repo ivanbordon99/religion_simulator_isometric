@@ -64,6 +64,12 @@ void Cell::updateDominance() {
 }
 
 ColorRGB Cell::getBiomeBaseColor() const {
+    if (isBurnt) {
+        return ColorRGB{52, 46, 42}; // Suelo calcinado y cenizas
+    }
+    if (isBurning) {
+        return ColorRGB{220, 95, 25}; // Suelo en combustión ígnea
+    }
     switch (biome) {
         case BiomeType::DeepOcean:
             return {24, 48, 89};

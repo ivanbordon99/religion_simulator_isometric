@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Types.hpp"
 #include <array>
 #include <cstdint>
 
@@ -54,7 +55,7 @@ public:
         {BiomeID::RockyPeak,        -0.18f, -0.08f,  0.90f, 0.50f, 0.45f, 1.65f}
     }};
 
-    static TileBiomeData sample(int x, int y, int width, int height, std::uint32_t seed);
+    static TileBiomeData sample(int x, int y, int width, int height, std::uint32_t seed, WorldClimate climate = WorldClimate::Templado);
     static TileBiomeData selectBiome(float temperature, float moisture, float elevation);
     static float applyOrographicCooling(float temperature_base, float elevation);
 };

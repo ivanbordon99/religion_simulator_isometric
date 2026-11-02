@@ -224,8 +224,24 @@ bool SaveSystem::saveWorld(Game& game, const std::string& worldFolderName) {
                         << r.cohesion << "|"
                         << r.theologyPoints << "|"
                         << static_cast<int>(r.currentEra) << "|"
-                        << (r.isExtinct ? 1 : 0) << "\n";
+                        << (r.isExtinct ? 1 : 0) << "|";
+                for (size_t a = 0; a < r.unlockedAdvancements.size(); ++a) {
+                    relFile << r.unlockedAdvancements[a];
+                    if (a + 1 < r.unlockedAdvancements.size()) relFile << ",";
+                }
+                relFile << "|" << r.resources.food << "," << r.resources.wood << ","
+                        << r.resources.stone << "," << r.resources.gold;
+                relFile << "\n";
             }
+        }
+    }
+
+    // 3b. Guardar mandatos y moral religiosa en morality.dat
+    std::string morPath = (saveDir / "morality.dat").string();
+    {
+        std::ofstream morFile(morPath);
+        if (morFile.is_open()) {
+            morFile << game.getMoralitySystem().serialize();
         }
     }
 
@@ -337,6 +353,7 @@ bool SaveSystem::loadWorld(Game& game, const std::string& worldFolderName) {
             }
         }
     }
+    newMap.assignNaturalResources(seed);
 
     // 3. Restaurar religiones
     ReligionRegistry newRegistry;
@@ -347,7 +364,7 @@ bool SaveSystem::loadWorld(Game& game, const std::string& worldFolderName) {
         while (std::getline(relFile, rline)) {
             if (rline.rfind("ID:", 0) != 0) continue;
             std::stringstream ss(rline.substr(3));
-            std::string idStr, name, founder, symbol, yearStr, colStr, zealStr, cohStr, theolStr, eraStr, extStr;
+            std::string idStr, name, founder, symbol, yearStr, colStr, zealStr, cohStr, theolStr, eraStr, extStr, advStr;
 
             std::getline(ss, idStr, '|');
             std::getline(ss, name, '|');
@@ -360,6 +377,7 @@ bool SaveSystem::loadWorld(Game& game, const std::string& worldFolderName) {
             std::getline(ss, theolStr, '|');
             std::getline(ss, eraStr, '|');
             std::getline(ss, extStr, '|');
+            std::getline(ss, advStr, '|');
 
             int r = 255, g = 200, b = 50;
             std::stringstream css(colStr);
@@ -376,7 +394,34 @@ bool SaveSystem::loadWorld(Game& game, const std::string& worldFolderName) {
                 if (!theolStr.empty()) rel->theologyPoints = std::stoi(theolStr);
                 if (!eraStr.empty()) rel->currentEra = static_cast<HistoricalEra>(std::stoi(eraStr));
                 if (!extStr.empty()) rel->isExtinct = (std::stoi(extStr) == 1);
+                if (!advStr.empty()) {
+                    std::stringstream as(advStr);
+                    std::string aIdStr;
+                    while (std::getline(as, aIdStr, ',')) {
+                        if (!aIdStr.empty()) rel->addAdvancement(std::stoi(aIdStr));
+                    }
+                }
+                std::string resStr;
+                if (std::getline(ss, resStr, '|')) {
+                    std::stringstream ress(resStr);
+                    std::string fStr, wStr, sStr, gStr;
+                    if (std::getline(ress, fStr, ',')) rel->resources.food = std::stoi(fStr);
+                    if (std::getline(ress, wStr, ',')) rel->resources.wood = std::stoi(wStr);
+                    if (std::getline(ress, sStr, ',')) rel->resources.stone = std::stoi(sStr);
+                    if (std::getline(ress, gStr, ',')) rel->resources.gold = std::stoi(gStr);
+                }
             }
+        }
+    }
+
+    // 3b. Cargar mandatos y moral religiosa
+    std::string morPath = (saveDir / "morality.dat").string();
+    if (fs::exists(morPath)) {
+        std::ifstream morFile(morPath);
+        if (morFile.is_open()) {
+            std::stringstream buffer;
+            buffer << morFile.rdbuf();
+            game.getMoralitySystem().deserialize(buffer.str());
         }
     }
 

@@ -51,7 +51,7 @@ float sample_noise(float x, float y, float frequency, int seed) {
 }
 
 TileBiomeData MultiNoiseBiomeGenerator::sample(int x, int y, int width, int height,
-                                               std::uint32_t seed) {
+                                               std::uint32_t seed, WorldClimate climate) {
     const float nx = static_cast<float>(x) / static_cast<float>(std::max(1, width - 1)) * 2.0f - 1.0f;
     const float ny = static_cast<float>(y) / static_cast<float>(std::max(1, height - 1)) * 2.0f - 1.0f;
     const float distanceFromCenter = std::sqrt(nx * nx + ny * ny);
@@ -60,13 +60,26 @@ TileBiomeData MultiNoiseBiomeGenerator::sample(int x, int y, int width, int heig
     const float legacyHeight = elevationSignal * 0.72f + 0.62f - distanceFromCenter * 0.48f;
     const float elevation = std::clamp(legacyHeight * 2.0f - 1.0f, -1.0f, 1.0f);
 
+    float climateTMod = 0.0f;
+    float climateMMod = 0.0f;
+    if (climate == WorldClimate::Glaciacion) {
+        climateTMod = -0.58f;
+        climateMMod = 0.12f;
+    } else if (climate == WorldClimate::Desertico) {
+        climateTMod = 0.46f;
+        climateMMod = -0.52f;
+    } else if (climate == WorldClimate::Tropical) {
+        climateTMod = 0.32f;
+        climateMMod = 0.48f;
+    }
+
     const float moistureBase =
         (sample_noise(nx, ny, 2.8f, static_cast<int>(seed + 3u)) * 0.65f +
-         sample_noise(nx, ny, 6.0f, static_cast<int>(seed + 4u)) * 0.35f);
+         sample_noise(nx, ny, 6.0f, static_cast<int>(seed + 4u)) * 0.35f) + climateMMod;
     const float moisture = std::clamp(moistureBase, -1.0f, 1.0f);
     const float temperatureBase = std::clamp(
         1.0f - 2.0f * std::abs(ny) +
-        sample_noise(nx, ny, 3.4f, static_cast<int>(seed + 5u)) * 0.24f,
+        sample_noise(nx, ny, 3.4f, static_cast<int>(seed + 5u)) * 0.24f + climateTMod,
         -1.0f, 1.0f);
     const float temperature = applyOrographicCooling(temperatureBase, elevation);
 

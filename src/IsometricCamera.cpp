@@ -25,6 +25,27 @@ void IsometricCamera::update(float deltaTime) {
     m_cameraX += (m_targetCameraX - m_cameraX) * lerpSpeed;
     m_cameraY += (m_targetCameraY - m_cameraY) * lerpSpeed;
     m_zoom += (m_targetZoom - m_zoom) * lerpSpeed;
+
+    // Actualización de sacudida sísmica (Screen Shake)
+    if (m_shakeTimer > 0.0f) {
+        m_shakeTimer -= deltaTime;
+        float progress = m_shakeTimer / std::max(0.01f, m_shakeDuration);
+        float currentMag = m_shakeIntensity * progress;
+        m_shakeSeed += deltaTime * 48.0f;
+        m_shakeOffsetX = std::sin(m_shakeSeed * 1.8f) * currentMag;
+        m_shakeOffsetY = std::cos(m_shakeSeed * 2.4f) * (currentMag * 0.7f);
+    } else {
+        m_shakeOffsetX = 0.0f;
+        m_shakeOffsetY = 0.0f;
+        m_shakeIntensity = 0.0f;
+        m_shakeTimer = 0.0f;
+    }
+}
+
+void IsometricCamera::addScreenShake(float intensity, float duration) {
+    m_shakeIntensity = std::max(m_shakeIntensity, intensity);
+    m_shakeDuration = std::max(m_shakeDuration, duration);
+    m_shakeTimer = std::max(m_shakeTimer, duration);
 }
 
 void IsometricCamera::zoomBy(float factor, float focalScreenX, float focalScreenY) {
@@ -98,8 +119,8 @@ Vec2 IsometricCamera::gridToScreen(float gx, float gy, float elevation) const {
     float isoY = (gx + gy) * halfH - elevation * ELEVATION_STEP;
 
     return {
-        isoX * m_zoom + m_cameraX,
-        isoY * m_zoom + m_cameraY
+        isoX * m_zoom + m_cameraX + m_shakeOffsetX,
+        isoY * m_zoom + m_cameraY + m_shakeOffsetY
     };
 }
 
@@ -108,8 +129,8 @@ Vec2 IsometricCamera::gridTileCenterScreen(int gx, int gy, float elevation) cons
 }
 
 void IsometricCamera::screenToGrid(float sx, float sy, int& outGx, int& outGy) const {
-    float isoX = (sx - m_cameraX) / m_zoom;
-    float isoY = (sy - m_cameraY) / m_zoom;
+    float isoX = (sx - m_cameraX - m_shakeOffsetX) / m_zoom;
+    float isoY = (sy - m_cameraY - m_shakeOffsetY) / m_zoom;
 
     float halfW = BASE_TILE_WIDTH * 0.5f;
     float halfH = BASE_TILE_HEIGHT * 0.5f;

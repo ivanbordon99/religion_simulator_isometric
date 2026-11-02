@@ -14,6 +14,14 @@
 #include "EventLine.hpp"
 #include "Renderer.hpp"
 #include "FogOfWar.hpp"
+#include "DivinePowersSystem.hpp"
+#include "DayNightCycle.hpp"
+#include "CloudSystem.hpp"
+#include "SoundSystem.hpp"
+#include "NemesisSififus.hpp"
+#include "ReligiousMoralitySystem.hpp"
+#include "BuildingSystem.hpp"
+#include "ErrorSystem.hpp"
 #include <memory>
 #include <string>
 
@@ -31,25 +39,42 @@ public:
     void update(float deltaTime);
     void render();
 
-    // Input handlers
-    void onMouseDown(int button, float x, float y);
-    void onMouseUp(int button, float x, float y);
-    void onMouseMove(float x, float y);
-    void onMouseWheel(float delta, float x, float y);
+    // EN: Input event handlers with descriptive screen coordinates
+    // ES: Manejadores de eventos de entrada con coordenadas descriptivas de pantalla
+    void onMouseDown(int mouseButton, float screenPosX, float screenPosY);
+    void onMouseUp(int mouseButton, float screenPosX, float screenPosY);
+    void onMouseMove(float screenPosX, float screenPosY);
+    void onMouseWheel(float wheelDelta, float screenPosX, float screenPosY);
     void onKeyPress(int keySym);
 
-    // Dynamic resize handler
+    // EN: Dynamic window resize handler / ES: Manejador de redimensionado dinámico de ventana
     void onWindowResize(int newWidth, int newHeight);
 
-    // Gameplay commands
-    void selectCell(int gx, int gy);
+    // EN: Gameplay interaction commands / ES: Comandos de interacción de juego
+    void selectCell(int gridCellX, int gridCellY);
     void triggerSyncretismAtSelection();
     void triggerSchismAtSelection();
     void buildHolySiteAtSelection();
 
+    // EN: Divine Powers and Intermediary system (Shaman / Prophet)
+    // ES: Sistema de Poderes Divinos e Intermediario (Chamán / Profeta)
+    void castDivinePower(DivinePowerType divineType, int targetGridX, int targetGridY);
+    void toggleDivinePowerTargeting(DivinePowerType type);
+    DivinePowerType getActiveDivinePower() const { return m_activeDivinePower; }
+    const DivinePowersSystem& getDivinePowers() const { return m_divinePowers; }
+    DivinePowersSystem& getDivinePowers() { return m_divinePowers; }
+    const DayNightCycle& getDayNightCycle() const { return m_dayNightCycle; }
+    DayNightCycle& getDayNightCycle() { return m_dayNightCycle; }
+    const CloudSystem& getCloudSystem() const { return m_cloudSystem; }
+    CloudSystem& getCloudSystem() { return m_cloudSystem; }
+    const SoundSystem& getSoundSystem() const { return m_soundSystem; }
+    SoundSystem& getSoundSystem() { return m_soundSystem; }
+
     // Accessors for testing
     const WorldMap& getMap() const { return m_map; }
     const ReligionRegistry& getRegistry() const { return m_registry; }
+    ReligionRegistry& getRegistryMutable() { return m_registry; }
+    int getPlayerReligionId() const { return resolvePlayerReligionId(); }
     const Timeline& getTimeline() const { return m_timeline; }
     const EventLine& getEventLine() const { return m_eventLine; }
     const TimeEngine& getTimeEngine() const { return m_timeEngine; }
@@ -63,8 +88,21 @@ public:
     WorldCreationConfig& getCreationConfig() { return m_creationConfig; }
     const Renderer& getRenderer() const { return m_renderer; }
     Renderer& getRenderer() { return m_renderer; }
+    const NemesisSififusManager& getNemesisSififus() const { return m_nemesisSififus; }
+    NemesisSififusManager& getNemesisSififus() { return m_nemesisSififus; }
+    const ReligiousMoralitySystem& getMoralitySystem() const { return m_moralitySystem; }
+    ReligiousMoralitySystem& getMoralitySystem() { return m_moralitySystem; }
+    const BuildingSystem& getBuildingSystem() const { return m_buildingSystem; }
+    BuildingSystem& getBuildingSystem() { return m_buildingSystem; }
     const FaithFogOfWar& getFogOfWar() const { return m_fog; }
     bool isLuminusActive() const { return m_cheatLuminusActive; }
+
+    // EN: Error and performance monitoring sentinel
+    // ES: Centinela de monitoreo de errores y rendimiento
+    const ErrorSystem& getErrorSystem() const { return ErrorSystem::instance(); }
+    ErrorSystem& getErrorSystem() { return ErrorSystem::instance(); }
+    void performEmergencyMemoryPurge();
+
     void runCommand(const std::string& cmd) { executeCommand(cmd); }
     void stop() { m_isRunning = false; }
 
@@ -96,12 +134,30 @@ private:
     TimeEngine m_timeEngine;
     EventLine m_eventLine;
     Renderer m_renderer;
+    DivinePowersSystem m_divinePowers;
+    DivinePowerType m_activeDivinePower{DivinePowerType::Inactive};
+    DayNightCycle m_dayNightCycle{90.0f, 9.0f};
+    CloudSystem m_cloudSystem{64, 64};
+    SoundSystem m_soundSystem;
+    NemesisSififusManager m_nemesisSififus;
+    ReligiousMoralitySystem m_moralitySystem;
+    BuildingSystem m_buildingSystem;
 
     Point2i m_selectedCell{24, 24};
-    RenderMapMode m_mapMode{RenderMapMode::ReligionDominance};
+    RenderMapMode m_mapMode{RenderMapMode::TerrainBiomes};
     bool m_scrubbingTimeline{false};
     float m_mouseX{640.0f};
     float m_mouseY{360.0f};
+
+    // Estado de Extinción de la Fe (Game Over / Derrota al morir todos los fieles)
+    bool m_gameOverTriggered{false};
+    float m_gameOverTimer{0.0f};
+    int m_extinctionYear{-4000};
+
+    // Ventana Modal de Crónica Sagrada y Puntos de Quiebre (Línea de tiempo horizontal)
+    bool m_chronicleOpen{false};
+    int m_chronicleFilter{0};         // 0: Todos, 1: Puntos de quiebre, 2: Pérdidas, 3: Avances, 4: Descubrimientos, 5: Cismas, 6: Sincretismo
+    int m_chronicleScrollIndex{0};    // Desplazamiento horizontal de las tarjetas
 
     // Consola de comandos/trucos (tecla Enter) y truco "SELECTOR"
     bool m_commandBoxOpen{false};

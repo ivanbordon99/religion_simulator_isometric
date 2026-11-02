@@ -14,8 +14,8 @@ void Timeline::update(float deltaTime, float& outDtYears) {
     outDtYears = 0.0f;
     if (m_isPaused || m_currentYear >= m_endYear) return;
 
-    // Simulation pace: 1 real second = 5 simulation years at 1x
-    float baseYearsPerSec = 4.0f;
+    // Simulation pace: 1 real second = baseYearsPerSec at 1x
+    float baseYearsPerSec = m_yearsPerSecond;
     float deltaYears = deltaTime * baseYearsPerSec * static_cast<float>(m_speedMultiplier);
 
     m_tickAccumulator += deltaYears;
@@ -62,6 +62,24 @@ void Timeline::recordSnapshot(int totalPop, const std::vector<uint8_t>& domMap,
 
     m_history.push_back(snap);
     m_lastSnapshotYear = m_currentYear;
+
+    // EN: Guard against unbounded memory growth by keeping snapshots capped
+    // ES: Evitar crecimiento ilimitado de memoria manteniendo un tope en las capturas
+    if (m_history.size() > 400) {
+        trimHistory(300);
+    }
+}
+
+// =============================================================================
+// EN: Prune oldest historical snapshots while preserving modern timeline records
+// ES: Podar las capturas históricas más antiguas preservando los registros recientes
+// =============================================================================
+void Timeline::trimHistory(size_t maximumSnapshotCount) {
+    if (m_history.size() <= maximumSnapshotCount || maximumSnapshotCount == 0) {
+        return;
+    }
+    const size_t excessCount = m_history.size() - maximumSnapshotCount;
+    m_history.erase(m_history.begin(), m_history.begin() + excessCount);
 }
 
 const HistorySnapshot* Timeline::getSnapshotNearYear(int year) const {
