@@ -57,6 +57,9 @@ public:
     void renderCommandConsole(bool isOpen, const std::string& inputText,
                               bool selectorActive, const std::string& feedbackMsg,
                               bool luminusActive = false);
+    void renderTopBar(const WorldMap& map, const ReligionRegistry& registry,
+                      const Timeline& timeline, const WorldCreationConfig& playerConfig,
+                      const GestorHumanos* humanos = nullptr);
 
     // Niebla de Guerra de la Fe: la visión proviene sólo del pueblo del jugador
     void setFogOfWar(const FaithFogOfWar* fog) { m_fog = fog; }
@@ -347,8 +350,6 @@ private:
                   const GestorHumanos& humanos, const IsometricCamera& camera,
                   const WorldCreationConfig& playerConfig,
                   const AdvancementSystem* advSystem = nullptr);
-    void renderTopBar(const WorldMap& map, const ReligionRegistry& registry,
-                      const Timeline& timeline, const WorldCreationConfig& playerConfig);
     void renderBottomBar(const WorldMap& map, const ReligionRegistry& registry,
                          const Timeline& timeline, const EventLine& eventLine,
                          const GestorHumanos& humanos, const IsometricCamera& camera,

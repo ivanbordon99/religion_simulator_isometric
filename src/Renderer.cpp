@@ -5457,7 +5457,7 @@ void Renderer::renderUI(const WorldMap& map, const ReligionRegistry& registry,
                         const WorldCreationConfig& playerConfig,
                         const AdvancementSystem* advSystem) {
     (void)selectedCell;
-    renderTopBar(map, registry, timeline, playerConfig);
+    renderTopBar(map, registry, timeline, playerConfig, &humanos);
     renderBottomBar(map, registry, timeline, eventLine, humanos, camera, mode);
     if (m_chronicleOpen) {
         renderChronicleModal(eventLine, timeline, m_chronicleFilter, m_chronicleScrollIndex,
@@ -5560,57 +5560,97 @@ void Renderer::renderCommandConsole(bool isOpen, const std::string& inputText,
 }
 
 void Renderer::renderTopBar(const WorldMap& map, const ReligionRegistry& registry,
-                            const Timeline& timeline, const WorldCreationConfig& playerConfig) {
-    (void)map;
-    const int topH = 34;
+                            const Timeline& timeline, const WorldCreationConfig& playerConfig,
+                            const GestorHumanos* humanos) {
+    constexpr int topH = 34;
 
-    // Región 1: Panel de Información de Pueblo (Izquierda - 44% ancho)
-    // Información de creyentes del jugador, Dios y recursos sagrados (Fondo #120b0a con volumen satinado Sims 2)
+    // EN: Region 1: Village & Resource Info Panel (Left - 44% width)
+    // ES: Región 1: Panel de Información de Pueblo y Recursos (Izquierda - 44% ancho)
     const int grisW = static_cast<int>(m_width * 0.44f);
     drawSims2Panel(0, 0, grisW, topH, ColorRGB{18, 11, 10}, false, ColorRGB{75, 52, 38});
     drawLine(0, topH, grisW, topH, Palette::DIVINE_GOLD);
 
-    // Datos del jugador, creyentes y recursos de supervivencia
-    const Religion* pRel = registry.getReligion(1);
-    int playerFollowers = pRel ? pRel->totalFollowers : 0;
-    int pietyPoints = pRel ? pRel->theologyPoints : 1000;
-    std::string godDisplay = "DIOS: " + playerConfig.godName + " | CULTO: " + playerConfig.religionName +
-                             " | POB: " + std::to_string(playerFollowers);
+    // EN: Extract player religion state, follower counts and available community resources
+    // ES: Extraer estado de la religión del jugador, conteo de fieles y recursos comunitarios disponibles
+    const Religion* playerReligion = registry.getReligion(1);
+    const Religion* pRel = playerReligion;
+    const int playerFollowers = playerReligion ? playerReligion->totalFollowers : 0;
+    const int pietyPoints = playerReligion ? playerReligion->theologyPoints : 1000;
+    const int totalWorldPopulation = map.getTotalWorldPopulation();
+    const int livingBelievers = humanos ? humanos->countLivingHumansOfReligion(1) : playerFollowers;
+
+    // EN: Top row: God, Cult Name and Global World Population summary
+    // ES: Fila superior: Dios, Nombre del Culto y resumen de Población Mundial Global
+    std::string godDisplay = "DIOS: " + playerConfig.godName + " | CULTO: " + playerConfig.religionName;
+    if (totalWorldPopulation > 0) {
+        godDisplay += " | MUNDO: " + std::to_string(totalWorldPopulation) + " hab.";
+    }
     drawText(10, 4, godDisplay.substr(0, 52), Palette::DIVINE_GOLD, 1);
 
-    // Recursos del pueblo para sobrevivir (Comida, Madera, Piedra, Oro, Hierro)
-    int food = pRel ? pRel->resources.food : 500;
-    int wood = pRel ? pRel->resources.wood : 300;
-    int stone = pRel ? pRel->resources.stone : 150;
-    int gold = pRel ? pRel->resources.gold : 50;
-    int iron = pRel ? pRel->resources.iron : 80;
-    bool starving = pRel ? pRel->resources.isStarving : false;
+    // EN: Community survival resources (Food, Wood, Stone, Gold, Iron, Faith, and Believers)
+    // ES: Recursos de supervivencia de la comunidad (Comida, Madera, Piedra, Oro, Hierro, Fe y Creyentes)
+    const int foodAmount = playerReligion ? playerReligion->resources.food : 500;
+    const int woodAmount = playerReligion ? playerReligion->resources.wood : 300;
+    const int stoneAmount = playerReligion ? playerReligion->resources.stone : 150;
+    const int goldAmount = playerReligion ? playerReligion->resources.gold : 50;
+    const int ironAmount = playerReligion ? playerReligion->resources.iron : 80;
+    const bool isStarving = playerReligion ? playerReligion->resources.isStarving : false;
 
-    int rx = 10;
-    std::string foodStr = "COM: " + std::to_string(food);
-    if (starving) foodStr += " (!)";
-    ColorRGB foodColor = starving ? ColorRGB{255, 60, 60} : (food < 100 ? ColorRGB{255, 180, 50} : ColorRGB{120, 220, 100});
-    drawText(rx, 17, foodStr, foodColor, 1);
-    rx += static_cast<int>(foodStr.size() * 6) + 10;
+    int currentResourceX = 10;
+    constexpr int resourceTextRowY = 17;
+    constexpr int characterWidth = 6;
+    constexpr int resourceElementGap = 10;
 
-    std::string woodStr = "MAD: " + std::to_string(wood);
-    drawText(rx, 17, woodStr, ColorRGB{210, 155, 95}, 1);
-    rx += static_cast<int>(woodStr.size() * 6) + 10;
+    std::string foodStr = "COM: " + std::to_string(foodAmount);
+    if (isStarving) foodStr += " (!)";
+    const ColorRGB foodColor = isStarving ? ColorRGB{255, 60, 60} : (foodAmount < 100 ? ColorRGB{255, 180, 50} : ColorRGB{120, 220, 100});
+    drawText(currentResourceX, resourceTextRowY, foodStr, foodColor, 1);
+    currentResourceX += static_cast<int>(foodStr.size() * characterWidth) + resourceElementGap;
 
-    std::string stoneStr = "PIE: " + std::to_string(stone);
-    drawText(rx, 17, stoneStr, ColorRGB{180, 195, 210}, 1);
-    rx += static_cast<int>(stoneStr.size() * 6) + 10;
+    std::string woodStr = "MAD: " + std::to_string(woodAmount);
+    drawText(currentResourceX, resourceTextRowY, woodStr, ColorRGB{210, 155, 95}, 1);
+    currentResourceX += static_cast<int>(woodStr.size() * characterWidth) + resourceElementGap;
 
-    std::string goldStr = "ORO: " + std::to_string(gold);
-    drawText(rx, 17, goldStr, ColorRGB{255, 215, 60}, 1);
-    rx += static_cast<int>(goldStr.size() * 6) + 10;
+    std::string stoneStr = "PIE: " + std::to_string(stoneAmount);
+    drawText(currentResourceX, resourceTextRowY, stoneStr, ColorRGB{180, 195, 210}, 1);
+    currentResourceX += static_cast<int>(stoneStr.size() * characterWidth) + resourceElementGap;
 
-    std::string ironStr = "HIE: " + std::to_string(iron);
-    drawText(rx, 17, ironStr, ColorRGB{160, 185, 210}, 1);
-    rx += static_cast<int>(ironStr.size() * 6) + 10;
+    std::string goldStr = "ORO: " + std::to_string(goldAmount);
+    drawText(currentResourceX, resourceTextRowY, goldStr, ColorRGB{255, 215, 60}, 1);
+    currentResourceX += static_cast<int>(goldStr.size() * characterWidth) + resourceElementGap;
 
-    std::string feStr = "| FE: " + std::to_string(pietyPoints) + " pts";
-    drawText(rx, 17, feStr, Palette::RELIC_BONE, 1);
+    std::string ironStr = "HIE: " + std::to_string(ironAmount);
+    drawText(currentResourceX, resourceTextRowY, ironStr, ColorRGB{160, 185, 210}, 1);
+    currentResourceX += static_cast<int>(ironStr.size() * characterWidth) + resourceElementGap;
+
+    std::string faithStr = "| FE: " + std::to_string(pietyPoints);
+    drawText(currentResourceX, resourceTextRowY, faithStr, Palette::RELIC_BONE, 1);
+    currentResourceX += static_cast<int>(faithStr.size() * characterWidth) + resourceElementGap;
+
+    // EN: Dedicated Believer / Faithful indicator in the resource panel with illuminated devotional icon
+    // ES: Indicador dedicado de Creyentes / Fieles en el panel de recursos con icono devocional iluminado
+    // Purpose: Provide immediate visibility of total believers alongside economic resources
+    // Mechanism: Render a 7x8 pixel art prayer silhouette and formatted follower count
+    // Preconditions: playerFollowers represents current territorial faith adherents
+    const int iconBelieverX = currentResourceX + 2;
+    const int iconBelieverY = resourceTextRowY;
+
+    // EN: Sacred halo (Divine Gold) / ES: Aureola sagrada (Oro Divino)
+    drawLine(iconBelieverX + 1, iconBelieverY, iconBelieverX + 5, iconBelieverY, Palette::DIVINE_GOLD);
+    // EN: Devotee head (Relic Bone) / ES: Cabeza del devoto (Hueso Reliquia)
+    drawLine(iconBelieverX + 2, iconBelieverY + 2, iconBelieverX + 4, iconBelieverY + 2, Palette::RELIC_BONE);
+    drawLine(iconBelieverX + 2, iconBelieverY + 3, iconBelieverX + 4, iconBelieverY + 3, Palette::RELIC_BONE);
+    // EN: Liturgical prayer tunic (Divine Gold) / ES: Túnica litúrgica de oración (Oro Divino)
+    drawLine(iconBelieverX + 1, iconBelieverY + 5, iconBelieverX + 5, iconBelieverY + 5, Palette::DIVINE_GOLD);
+    drawLine(iconBelieverX, iconBelieverY + 6, iconBelieverX + 6, iconBelieverY + 6, Palette::DIVINE_GOLD);
+    drawLine(iconBelieverX, iconBelieverY + 7, iconBelieverX + 6, iconBelieverY + 7, Palette::DIVINE_GOLD);
+
+    const int textBelieverX = iconBelieverX + 9;
+    std::string believersStr = "CREYENTES: " + std::to_string(playerFollowers);
+    if (humanos && livingBelievers > 0 && livingBelievers != playerFollowers) {
+        believersStr += " (" + std::to_string(livingBelievers) + " vivos)";
+    }
+    drawText(textBelieverX, resourceTextRowY, believersStr, Palette::DIVINE_GOLD, 1);
 
     // Región 2: BLANCO (Centro - 12% ancho)
     // Era actual del pueblo de Dios con banner sagrado estilo papiro satinado
@@ -8214,7 +8254,7 @@ void Renderer::renderInspector(const WorldMap& map, const ReligionRegistry& regi
             drawText(panelX + 15, curY + 50, "Zeal: " + std::to_string(static_cast<int>(dom->zeal * 100)) +
                      "%  Syncretism: " + std::to_string(static_cast<int>(dom->syncretismTolerance * 100)) + "%",
                      ColorRGB(204, 181, 189), 1); // Lino Litúrgico
-            drawText(panelX + 15, curY + 66, "Adherents: " + std::to_string(dom->totalFollowers), ColorRGB(230, 161, 59), 1); // Ocre Dorado
+            drawText(panelX + 15, curY + 66, "Creyentes: " + std::to_string(dom->totalFollowers), ColorRGB(230, 161, 59), 1); // Ocre Dorado
             drawText(panelX + 15, curY + 82, "Doctrines: " + std::to_string(dom->doctrines.size()), ColorRGB(212, 175, 55), 1);
         }
     }

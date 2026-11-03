@@ -4461,6 +4461,101 @@ void testErrorSystemAndLagMitigationWatchdog() {
     std::cout << "  -> testErrorSystemAndLagMitigationWatchdog PASSED! Memory overflow prevention, anti-lag frame pacing, and buffer boundary safety fully verified." << std::endl;
 }
 
+// =============================================================================
+// EN: Test Resource Panel Believers Indicator
+// ES: Prueba del Indicador de Creyentes en el Panel de Recursos
+// =============================================================================
+void testResourcePanelBelieversIndicator() {
+    std::cout << "[Test] Running testResourcePanelBelieversIndicator..." << std::endl;
+
+    // EN: Block 1 - World, registry and player religion setup
+    // ES: Bloque 1 - Configuración de mundo, registro y religión del jugador
+    ReligionSim::WorldMap testMap(20, 20);
+    ReligionSim::ReligionRegistry testRegistry;
+    ReligionSim::Timeline testTimeline;
+    ReligionSim::WorldCreationConfig testConfig;
+    testConfig.godName = "Solarius";
+    testConfig.religionName = "Culto Solar";
+
+    ReligionSim::Religion playerFaith;
+    playerFaith.id = 1;
+    playerFaith.name = "Culto Solar";
+    playerFaith.totalFollowers = 42;
+    playerFaith.theologyPoints = 850;
+    playerFaith.resources.food = 600;
+    playerFaith.resources.wood = 400;
+    playerFaith.resources.stone = 200;
+    playerFaith.resources.gold = 100;
+    playerFaith.resources.iron = 90;
+    testRegistry.getAllReligions().push_back(playerFaith);
+
+    // EN: Block 2 - Living villagers and disciple tracking in GestorHumanos
+    // ES: Bloque 2 - Aldeanos vivos y seguimiento de discípulos en GestorHumanos
+    ReligionSim::GestorHumanos testHumanos;
+    testHumanos.getHumanos().clear();
+
+    ReligionSim::Humano discipleA(101, "Aram", 5.0f, 5.0f, ReligionSim::GeneroHumano::HOMBRE);
+    discipleA.setReligionId(1);
+    ReligionSim::Humano discipleB(102, "Mira", 6.0f, 5.0f, ReligionSim::GeneroHumano::MUJER);
+    discipleB.setReligionId(1);
+    ReligionSim::Humano rivalVillager(103, "Orak", 10.0f, 10.0f, ReligionSim::GeneroHumano::HOMBRE);
+    rivalVillager.setReligionId(2);
+
+    testHumanos.agregarHumano(discipleA);
+    testHumanos.agregarHumano(discipleB);
+    testHumanos.agregarHumano(rivalVillager);
+
+    const int livingDisciplesCount = testHumanos.countLivingHumansOfReligion(1);
+    assert(livingDisciplesCount == 2);
+    assert(testHumanos.countLivingHumansOfReligion(2) == 1);
+
+    // EN: Block 3 - TopBar rendering and illuminated believer icon verification
+    // ES: Bloque 3 - Renderizado de barra superior y verificación del icono iluminado de creyente
+    ReligionSim::Renderer testRenderer(1280, 720);
+    testRenderer.renderTopBar(testMap, testRegistry, testTimeline, testConfig, &testHumanos);
+
+    const auto& frameBufferPixels = testRenderer.getFramebuffer();
+    assert(!frameBufferPixels.empty());
+
+    // EN: Inspect framebuffer across the resource row (y = 17) to verify golden icon and believer text
+    // ES: Inspeccionar el framebuffer en la fila de recursos (y = 17) para verificar icono dorado y texto de creyentes
+    int divineGoldPixelsCount = 0;
+    int relicBonePixelsCount = 0;
+    constexpr int targetRowY = 17;
+    const int invertedRowY = 720 - 1 - targetRowY;
+
+    for (int columnX = 250; columnX < 550; ++columnX) {
+        for (int rowOffset = -3; rowOffset <= 5; ++rowOffset) {
+            const int scanPixelY = invertedRowY + rowOffset;
+            if (scanPixelY >= 0 && scanPixelY < 720) {
+                const uint32_t currentPixel = frameBufferPixels[scanPixelY * 1280 + columnX];
+                const uint8_t redComponent = currentPixel & 0xFF;
+                const uint8_t greenComponent = (currentPixel >> 8) & 0xFF;
+                const uint8_t blueComponent = (currentPixel >> 16) & 0xFF;
+
+                // Palette::DIVINE_GOLD (#D4AF37 -> R:212, G:175, B:55)
+                if (redComponent >= 180 && greenComponent >= 150 && blueComponent <= 100) {
+                    ++divineGoldPixelsCount;
+                }
+                // Palette::RELIC_BONE (#E2DAC4 -> R:226, G:218, B:196)
+                if (redComponent >= 200 && greenComponent >= 190 && blueComponent >= 160) {
+                    ++relicBonePixelsCount;
+                }
+            }
+        }
+    }
+
+    assert(divineGoldPixelsCount > 20); // Aureola sagrada, manto litúrgico y texto CREYENTES
+    assert(relicBonePixelsCount > 10);  // Cabeza y acentos litúrgicos
+
+    // EN: Block 4 - TopBar fallback without GestorHumanos pointer
+    // ES: Bloque 4 - Fallback de barra superior sin puntero a GestorHumanos
+    testRenderer.renderTopBar(testMap, testRegistry, testTimeline, testConfig, nullptr);
+    assert(divineGoldPixelsCount > 20);
+
+    std::cout << "  -> testResourcePanelBelieversIndicator PASSED! Dedicated believer section, golden halo icon, and follower counts verified." << std::endl;
+}
+
 int main() {
     std::cout << "========================================" << std::endl;
     std::cout << "     RUNNING RELIGION SIMULATOR TESTS   " << std::endl;
@@ -4511,6 +4606,7 @@ int main() {
     testLivingOrganismsCircadianAndFamilyDefenseSystem();
     testHouseSpriteHidingCapacityAndProbabilisticReproductionSystem();
     testErrorSystemAndLagMitigationWatchdog();
+    testResourcePanelBelieversIndicator();
 
     std::cout << "========================================" << std::endl;
     std::cout << "      ALL TESTS PASSED SUCCESSFULLY!    " << std::endl;
