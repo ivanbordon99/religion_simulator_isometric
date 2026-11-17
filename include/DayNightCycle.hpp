@@ -16,10 +16,19 @@ enum class DayPhase : uint8_t {
     Night      // Noche temprana (20:00 - 24:00)
 };
 
+// EN: Liturgical Season of the Year corresponding to the 24-hour solar cycle
+// ES: Estación Litúrgica del Año correspondiente al ciclo solar de 24 horas
+enum class LiturgicalSeason : uint8_t {
+    Winter = 0,   // Invierno (00:00 - 06:00 / Noche profunda, frío y descanso)
+    Spring = 1,   // Primavera (06:00 - 12:00 / Aurora, despertar y siembra)
+    Summer = 2,   // Verano (12:00 - 18:00 / Cenit solar, cosecha y vigor)
+    Autumn = 3    // Otoño (18:00 - 24:00 / Ocaso, agradecimiento y vigilia)
+};
+
 class DayNightCycle {
 public:
-    // Duración de 1 ciclo diurno completo (24h de simulación): 90.0s reales a 1X
-    explicit DayNightCycle(float dayDurationSeconds = 90.0f, float initialHour = 9.0f);
+    // Duración de 1 ciclo diurno completo (24h de simulación): 72.0s reales a 1X para ritmo contemplativo
+    explicit DayNightCycle(float dayDurationSeconds = 72.0f, float initialHour = 9.0f);
 
     void update(float dt);
 
@@ -32,6 +41,14 @@ public:
     DayPhase getPhase() const;
     bool isDay() const;
     bool isNight() const;
+
+    LiturgicalSeason getSeason() const;
+    std::string getSeasonName() const;
+
+    int getDaysPassed() const { return m_daysPassed; }
+    void setDaysPassed(int days) { m_daysPassed = std::max(0, days); }
+    void resetDaysPassed() { m_daysPassed = 0; }
+    double getTotalHoursPassed() const { return static_cast<double>(m_daysPassed) * 24.0 + static_cast<double>(getHour()); }
 
     std::string getPhaseName() const;
     std::string getTimeFormatted() const;
@@ -64,9 +81,10 @@ public:
     float getLightningFlashIntensity() const;
 
 private:
-    float m_dayDuration{90.0f}; // Segundos reales de un ciclo completo de 24 horas
+    float m_dayDuration{72.0f}; // Segundos reales de un ciclo completo de 24 horas (ritmo contemplativo)
     float m_timeOfDay{0.375f};  // 0.375 * 24 = 9:00 AM (comienza en la mañana)
     float m_timer{0.0f};
+    int m_daysPassed{0};
     bool m_paused{false};
 
     float m_lightningFlashTimer{0.0f};

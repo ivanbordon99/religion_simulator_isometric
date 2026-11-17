@@ -33,6 +33,74 @@ enum class HumanGender : uint8_t {
 };
 using GeneroHumano = HumanGender;
 
+// EN: Physiological, psychological, and behavioral conditions of villagers
+// ES: Condiciones fisiológicas, psicológicas y conductuales de los aldeanos
+enum class VillagerCondition : uint16_t {
+    Healthy = 0,    // EN: Healthy / ES: Sano (Equilibrio vital óptimo, buen desempeño)
+    Hungry = 1,     // EN: Hungry / ES: Hambriento (Desnutrición, debilidad, busca comida urgente)
+    Full = 2,       // EN: Full / ES: Lleno (Saciado, bonus de energía, altruismo y reproducción)
+    Sick = 3,       // EN: Sick / ES: Enfermo (Infección/malestar, tose, busca alivio o cura)
+    Drunk = 4,      // EN: Drunk / ES: Borracho (Embriagado por fermentos/vino, tambaleo y euforia festiva)
+    Aggressive = 5, // EN: Aggressive / ES: Agresivo (Beligerancia, furia combativa, ataca con furia)
+    Scared = 6,     // EN: Scared / ES: Asustado (Pánico ante cataclismos o amenazas mortales, huida)
+    Exhausted = 7,  // EN: Exhausted / ES: Exhausto (Fatiga extrema, lentitud severa, busca dormir)
+    Inspired = 8,   // EN: Inspired / ES: Inspirado (Éxtasis sagrado, bendición divina, alta productividad)
+    Injured = 9     // EN: Injured / ES: Herido (Salud crítica, renguera, busca auxilio)
+};
+using EstadoAldeano = VillagerCondition;
+
+// EN: Convert villager condition enum to readable localized text
+// ES: Convertir enumeración de condición de aldeano a texto legible localizado
+inline const char* getVillagerConditionName(VillagerCondition condition, bool inSpanish = true) {
+    if (inSpanish) {
+        switch (condition) {
+            case VillagerCondition::Healthy:    return "Sano";
+            case VillagerCondition::Hungry:     return "Hambriento";
+            case VillagerCondition::Full:       return "Lleno";
+            case VillagerCondition::Sick:       return "Enfermo";
+            case VillagerCondition::Drunk:      return "Borracho";
+            case VillagerCondition::Aggressive: return "Agresivo";
+            case VillagerCondition::Scared:     return "Asustado";
+            case VillagerCondition::Exhausted:  return "Exhausto";
+            case VillagerCondition::Inspired:   return "Inspirado";
+            case VillagerCondition::Injured:    return "Herido";
+            default:                            return "Sano";
+        }
+    } else {
+        switch (condition) {
+            case VillagerCondition::Healthy:    return "Healthy";
+            case VillagerCondition::Hungry:     return "Hungry";
+            case VillagerCondition::Full:       return "Full";
+            case VillagerCondition::Sick:       return "Sick";
+            case VillagerCondition::Drunk:      return "Drunk";
+            case VillagerCondition::Aggressive: return "Aggressive";
+            case VillagerCondition::Scared:     return "Scared";
+            case VillagerCondition::Exhausted:  return "Exhausted";
+            case VillagerCondition::Inspired:   return "Inspired";
+            case VillagerCondition::Injured:    return "Injured";
+            default:                            return "Healthy";
+        }
+    }
+}
+
+// EN: Color representation associated with each villager condition
+// ES: Color representativo asociado a cada condición del aldeano
+inline ColorRGB getVillagerConditionColor(VillagerCondition condition) {
+    switch (condition) {
+        case VillagerCondition::Healthy:    return ColorRGB{46, 215, 80};   // Verde saludable
+        case VillagerCondition::Hungry:     return ColorRGB{245, 145, 35};  // Naranja hambre
+        case VillagerCondition::Full:       return ColorRGB{235, 195, 55};  // Oro saciado
+        case VillagerCondition::Sick:       return ColorRGB{125, 215, 55};  // Verde enfermizo / febril
+        case VillagerCondition::Drunk:      return ColorRGB{195, 85, 225};  // Violeta embriaguez
+        case VillagerCondition::Aggressive: return ColorRGB{235, 45, 45};   // Rojo furia
+        case VillagerCondition::Scared:     return ColorRGB{255, 220, 50};  // Amarillo pánico
+        case VillagerCondition::Exhausted:  return ColorRGB{140, 175, 215}; // Azul grisáceo fatiga
+        case VillagerCondition::Inspired:   return ColorRGB{255, 235, 110}; // Oro celestial éxtasis
+        case VillagerCondition::Injured:    return ColorRGB{215, 50, 50};   // Carmesí herida
+        default:                            return ColorRGB{226, 218, 196}; // Relic bone
+    }
+}
+
 class Humano {
 public:
     Humano(int id = 1, const std::string& name = "Grog", float startX = 20.5f, float startY = 20.5f,
@@ -357,11 +425,15 @@ public:
     // EN: Spatial environmental map queries
     // ES: Búsquedas sistémicas en el mapa
     bool findResourceNode(const WorldMap& mapRef, ResourceType resourceType, int maxRadius, Point2i& outCellPos) const;
+    bool findAnyResourceNode(const WorldMap& mapRef, int maxRadius, Point2i& outCellPos, ResourceType& outResourceType) const;
     bool findShrineOrAltar(const WorldMap& mapRef, int religionId, int maxRadius, Point2i& outCellPos) const;
     bool findCommunityCenter(const WorldMap& mapRef, int religionId, int maxRadius, Point2i& outCellPos) const;
 
     inline bool buscarNodoRecurso(const WorldMap& mapRef, ResourceType resourceType, int maxRadius, Point2i& outCellPos) const {
         return findResourceNode(mapRef, resourceType, maxRadius, outCellPos);
+    }
+    inline bool buscarCualquierNodoRecurso(const WorldMap& mapRef, int maxRadius, Point2i& outCellPos, ResourceType& outResourceType) const {
+        return findAnyResourceNode(mapRef, maxRadius, outCellPos, outResourceType);
     }
     inline bool buscarSantuarioOAltar(const WorldMap& mapRef, int religionId, int maxRadius, Point2i& outCellPos) const {
         return findShrineOrAltar(mapRef, religionId, maxRadius, outCellPos);
@@ -421,11 +493,62 @@ public:
     void modifyEnergy(float deltaEnergy) { setEnergy(m_energy + deltaEnergy); }
 
     inline void setSalud(float health) { setHealth(health); }
+    inline void heal(float healAmount) {
+        if (healAmount <= 0.0f || m_health <= 0.0f) return;
+        setHealth(m_health + healAmount);
+    }
+    inline void curar(float healAmount) { heal(healAmount); }
     inline void recibirDano(float damageAmount) { takeDamage(damageAmount); }
     inline float getTimerDano() const { return getDamageTimer(); }
     inline float getEnergia() const { return getEnergy(); }
     inline void setEnergia(float energy) { setEnergy(energy); }
     inline void modificarEnergia(float deltaEnergy) { modifyEnergy(deltaEnergy); }
+
+    // EN: Physiological, psychological, and behavioral condition evaluation
+    // ES: Evaluación de condición fisiológica, psicológica y conductual del aldeano
+    [[nodiscard]] VillagerCondition getCondition() const;
+    [[nodiscard]] inline VillagerCondition getCondicion() const { return getCondition(); }
+    [[nodiscard]] std::string getConditionName(bool inSpanish = true) const {
+        return getVillagerConditionName(getCondition(), inSpanish);
+    }
+    [[nodiscard]] inline std::string getNombreCondicion(bool inSpanish = true) const {
+        return getConditionName(inSpanish);
+    }
+    [[nodiscard]] ColorRGB getConditionColor() const {
+        return getVillagerConditionColor(getCondition());
+    }
+
+    // EN: Alcohol intoxication, drunkenness level, and festivity
+    // ES: Intoxicación etílica, nivel de embriaguez y festividad
+    [[nodiscard]] float getAlcoholLevel() const { return m_alcoholLevel; }
+    void setAlcoholLevel(float level) { m_alcoholLevel = std::clamp(level, 0.0f, 100.0f); }
+    void consumeAlcohol(float amount) { setAlcoholLevel(m_alcoholLevel + amount); }
+    [[nodiscard]] inline float getAlcohol() const { return getAlcoholLevel(); }
+    inline void setAlcohol(float level) { setAlcoholLevel(level); }
+    inline void consumirAlcohol(float amount) { consumeAlcohol(amount); }
+    [[nodiscard]] bool isDrunk() const { return m_alcoholLevel > 30.0f; }
+    [[nodiscard]] inline bool estaBorracho() const { return isDrunk(); }
+
+    // EN: Combat rage, belligerence, and aggressive state
+    // ES: Furia combativa, beligerancia y estado agresivo
+    [[nodiscard]] float getAggressionLevel() const { return m_aggressionLevel; }
+    void setAggressionLevel(float level) { m_aggressionLevel = std::clamp(level, 0.0f, 100.0f); }
+    void provokeAggression(float amount = 50.0f) { setAggressionLevel(m_aggressionLevel + amount); }
+    [[nodiscard]] inline float getAgresividad() const { return getAggressionLevel(); }
+    inline void setAgresividad(float level) { setAggressionLevel(level); }
+    inline void provocarAgresividad(float amount = 50.0f) { provokeAggression(amount); }
+    [[nodiscard]] bool isAggressive() const { return m_protectiveFuryTimer > 0.0f || m_aggressionLevel > 50.0f; }
+    [[nodiscard]] inline bool estaAgresivo() const { return isAggressive(); }
+
+    // EN: Reset temporary conditions (alcohol, rage, panic, infection, ecstasy)
+    // ES: Restablecer condiciones temporales (alcohol, furia, pánico, infección, éxtasis)
+    void resetConditions();
+    inline void resetCondiciones() { resetConditions(); }
+
+    // EN: Effective movement speed modulated by current biological/psychological condition
+    // ES: Velocidad efectiva de movimiento modulada por la condición biológica/psicológica actual
+    [[nodiscard]] float getEffectiveSpeed() const;
+    [[nodiscard]] inline float getVelocidadEfectiva() const { return getEffectiveSpeed(); }
 
     const RealisticPopGroup& getPopGroup() const { return m_popGroup; }
     RealisticPopGroup& getPopGroupMutable() { return m_popGroup; }
@@ -477,16 +600,20 @@ public:
     bool isInfected() const { return m_isInfected; }
     void setInfected(bool infected) { m_isInfected = infected; }
     float getInfectionTimer() const { return m_infectionTimer; }
+    void setInfectionTimer(float timer) { m_infectionTimer = timer; }
+    inline void setTimerInfeccion(float timer) { setInfectionTimer(timer); }
     float getCoughTimer() const { return m_coughTimer; }
 
     bool isDrowning() const { return m_isDrowning; }
     void setDrowning(bool drowning) { m_isDrowning = drowning; }
     bool isSwimming() const { return m_isSwimming; }
     void setSwimming(bool swimming) { m_isSwimming = swimming; }
+    inline bool estaNadando() const { return isSwimming(); }
+    inline void setEstaNadando(bool swimming) { setSwimming(swimming); }
     const std::string& getCauseOfDeath() const { return m_causeOfDeath; }
     void setCauseOfDeath(const std::string& cause) { m_causeOfDeath = cause; }
-    void kill(const std::string& cause = "Fallecimiento");
-    inline void matar(const std::string& cause = "Fallecimiento") { kill(cause); }
+    void kill(const std::string& cause = "Fallecimiento", float corpseDurationSec = 2.0f);
+    inline void matar(const std::string& cause = "Fallecimiento", float corpseDurationSec = 2.0f) { kill(cause, corpseDurationSec); }
 
     void activateRagdoll(float impulseX, float impulseY, float impulseZ, float angularSpeedRadS = 12.0f);
     inline void activarRagdoll(float impulseX, float impulseY, float impulseZ, float angularSpeedRadS = 12.0f) {
@@ -516,6 +643,17 @@ public:
     inline void infectarConPandemia(float duration = 18.0f) {
         infectWithPandemic(duration);
     }
+
+    // EN: Fire ignition, burning state, panic flight, and water extinguishing
+    // ES: Ignición por fuego, estado en llamas, huida en pánico y extinción en agua
+    [[nodiscard]] bool isBurning() const { return m_isBurning; }
+    [[nodiscard]] inline bool estaEnLlamas() const { return isBurning(); }
+    [[nodiscard]] float getBurnTimer() const { return m_burnTimer; }
+    void ignite(float durationSeconds = 6.0f);
+    inline void prenderFuego(float durationSeconds = 6.0f) { ignite(durationSeconds); }
+    void extinguishFire();
+    inline void apagarFuego() { extinguishFire(); }
+
     void processWaterFall(const WorldMap& mapRef);
     inline void procesarCaidaEnAgua(const WorldMap& mapRef) {
         processWaterFall(mapRef);
@@ -524,6 +662,21 @@ public:
     inline void procesarAterrizajeTierra(const WorldMap& mapRef) {
         processGroundLanding(mapRef);
     }
+    // EN: Calculate and apply physics-based fall damage to living units
+    // ES: Calcular y aplicar daño por caída basado en físicas a unidades vivas
+    void applyFallDamage(float impactSpeed, const WorldMap& mapRef);
+    inline void aplicarDanoPorCaida(float impactSpeed, const WorldMap& mapRef) {
+        applyFallDamage(impactSpeed, mapRef);
+    }
+    float getLastFallDamage() const { return m_lastFallDamage; }
+
+    // EN: Check cliff elevation drop and initiate free-fall if stepping off an edge
+    // ES: Verificar desnivel de riscos y precipicios e iniciar caída libre si se sale por un borde
+    void checkCliffFall(int previousCellX, int previousCellY, const WorldMap& mapRef);
+    inline void verificarCaidaPorRisco(int previousCellX, int previousCellY, const WorldMap& mapRef) {
+        checkCliffFall(previousCellX, previousCellY, mapRef);
+    }
+
     bool findNearbySolidGround(const WorldMap& mapRef, float& outWorldX, float& outWorldY) const;
     inline bool buscarTierraFirmeCercana(const WorldMap& mapRef, float& outWorldX, float& outWorldY) const {
         return findNearbySolidGround(mapRef, outWorldX, outWorldY);
@@ -600,6 +753,43 @@ public:
         return calculateReproductionDesire(spouseRef, mapRef, buildingSystemRef);
     }
 
+    // EN: Living organism biological drives (reproduction, parental investment, and colonization)
+    // ES: Impulsos biológicos del organismo vivo (reproducción, inversión parental y colonización)
+    float getReproductionDrive() const { return m_reproductionDrive; }
+    void setReproductionDrive(float drive) { m_reproductionDrive = std::clamp(drive, 0.0f, 1.0f); }
+    void modifyReproductionDrive(float deltaDrive) { m_reproductionDrive = std::clamp(m_reproductionDrive + deltaDrive, 0.0f, 1.0f); }
+
+    float getCourtshipTimer() const { return m_courtshipTimer; }
+    void setCourtshipTimer(float timer) { m_courtshipTimer = std::max(0.0f, timer); }
+
+    float getParentalCareTimer() const { return m_parentalCareTimer; }
+    void setParentalCareTimer(float timer) { m_parentalCareTimer = std::max(0.0f, timer); }
+
+    float getPioneeringUrge() const { return m_pioneeringUrge; }
+    void setPioneeringUrge(float urge) { m_pioneeringUrge = std::clamp(urge, 0.0f, 1.0f); }
+    void modifyPioneeringUrge(float deltaUrge) { m_pioneeringUrge = std::clamp(m_pioneeringUrge + deltaUrge, 0.0f, 1.0f); }
+
+    inline float getDeseoReproduccionBiologico() const { return getReproductionDrive(); }
+    inline void setDeseoReproduccionBiologico(float drive) { setReproductionDrive(drive); }
+    inline void modificarDeseoReproduccionBiologico(float deltaDrive) { modifyReproductionDrive(deltaDrive); }
+    inline float getTimerCortejo() const { return getCourtshipTimer(); }
+    inline void setTimerCortejo(float timer) { setCourtshipTimer(timer); }
+    inline float getImpulsoPionero() const { return getPioneeringUrge(); }
+    inline void setImpulsoPionero(float urge) { setPioneeringUrge(urge); }
+    inline void modificarImpulsoPionero(float deltaUrge) { modifyPioneeringUrge(deltaUrge); }
+
+    // EN: Parental investment: share gathered or stored food with a hungry child
+    // ES: Inversión parental: compartir alimento recolectado o corporal con un hijo hambriento
+    bool feedChild(Humano& childRef);
+    inline bool alimentarHijo(Humano& childRef) { return feedChild(childRef); }
+
+    // EN: Active courtship of a compatible prospective partner
+    // ES: Cortejo activo hacia una pareja potencial compatible
+    bool courtCandidate(Humano& candidateRef, float deltaTime, EventLine* eventLine = nullptr, int currentYear = -4000);
+    inline bool cortejarPretendiente(Humano& candidateRef, float deltaTime, EventLine* eventLine = nullptr, int currentYear = -4000) {
+        return courtCandidate(candidateRef, deltaTime, eventLine, currentYear);
+    }
+
 private:
     int m_id{1};
     std::string m_name{"Grog"};
@@ -611,6 +801,10 @@ private:
     bool m_isPregnant{false};
     float m_pregnancyProgress{0.0f};
     float m_fertilityCooldown{0.0f};
+    float m_reproductionDrive{0.20f};
+    float m_courtshipTimer{0.0f};
+    float m_parentalCareTimer{0.0f};
+    float m_pioneeringUrge{0.0f};
 
     // Linaje, edad y crecimiento
     float m_age{20.0f};
@@ -680,6 +874,7 @@ private:
     float m_velocityY{0.0f};
     bool m_flying{false};
     float m_angularAngle{0.0f};
+    float m_lastFallDamage{0.0f};
 
     float m_panicTimer{0.0f};
     float m_stumbleTimer{0.0f};
@@ -692,7 +887,17 @@ private:
 
     bool m_isDrowning{false};
     bool m_isSwimming{false};
+    bool m_isBurning{false};
+    float m_burnTimer{0.0f};
+    float m_burnDamageTimer{0.0f};
     std::string m_causeOfDeath{""};
+
+    // EN: Alcohol intoxication, drunkenness sway, and aggression states
+    // ES: Intoxicación etílica, tambaleo de embriaguez y estados de agresividad
+    float m_alcoholLevel{0.0f};
+    float m_drunkenSwayTimer{0.0f};
+    float m_aggressionLevel{0.0f};
+
     Ragdoll m_ragdoll;
 };
 

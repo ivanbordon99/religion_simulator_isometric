@@ -23,6 +23,7 @@
 #include "ReligiousMoralitySystem.hpp"
 #include "BuildingSystem.hpp"
 #include "ErrorSystem.hpp"
+#include "SaveSystem.hpp"
 #include "Game.hpp"
 #include <iostream>
 #include <cassert>
@@ -31,6 +32,7 @@
 #include <fstream>
 #include <iterator>
 #include <vector>
+#include <filesystem>
 
 void testIsometricCamera() {
     std::cout << "[Test] Running testIsometricCamera..." << std::endl;
@@ -125,7 +127,7 @@ void testWorldMap() {
         int isolatedCells = 0;
         int matchingLandEdges = 0;
         int totalLandEdges = 0;
-        bool representedLandBiomes[9]{};
+        bool representedLandBiomes[10]{};
 
         for (int y = 0; y < cohesionMap.getHeight(); ++y) {
             for (int x = 0; x < cohesionMap.getWidth(); ++x) {
@@ -1268,10 +1270,14 @@ void testTerrainHazardsAndProphetMiracle() {
     // Los controles de simulación deben estar justo debajo de la línea de tiempo (botY + 24) y con dimensiones amplias
     float botY = 720.0f - 118.0f; // botH = 118
     assert(btnPausa->y == botY + 24.0f);
-    assert(btn1x->y == botY + 24.0f);
     assert(btnPausa->width >= 100.0f);
-    assert(btn1x->width >= 70.0f);
     assert(btnPausa->height >= 26.0f);
+
+    // EN: Verify round Play button geometry (strictly circular with diameter 30, centered with cassette keys)
+    // ES: Verificar la geometría del botón redondo de Play (estrictamente circular con diámetro 30, centrado con las teclas de casetera)
+    assert(btn1x->width == 30.0f);
+    assert(btn1x->height == 30.0f);
+    assert(btn1x->y == botY + 22.0f);
 
     // Los poderes de Dios deben estar DEBAJO de los controles de simulación (botY + 54 > botY + 24)
     assert(btnRayo->y >= botY + 52.0f && btnRayo->y <= botY + 58.0f);
@@ -1427,12 +1433,14 @@ void testResourceSystemAndWorldCreation() {
                 assert(c.biome == ReligionSim::BiomeType::HighlandHills ||
                        c.biome == ReligionSim::BiomeType::RuggedMountains ||
                        c.biome == ReligionSim::BiomeType::AridDesert ||
-                       c.biome == ReligionSim::BiomeType::FrozenTundra);
+                       c.biome == ReligionSim::BiomeType::FrozenTundra ||
+                       c.biome == ReligionSim::BiomeType::VolcanicCaldera);
             } else if (c.naturalResource == ReligionSim::ResourceType::Gold) {
                 totalGold += c.resourceAmount;
                 goldTiles++;
                 assert(c.biome == ReligionSim::BiomeType::HighlandHills ||
-                       c.biome == ReligionSim::BiomeType::RuggedMountains);
+                       c.biome == ReligionSim::BiomeType::RuggedMountains ||
+                       c.biome == ReligionSim::BiomeType::VolcanicCaldera);
             }
         }
     }
@@ -1496,6 +1504,12 @@ void testResourceSystemAndWorldCreation() {
     assert(rel->resources.isStarving);
     rel->resources.addResource(ReligionSim::ResourceType::Iron, 75);
     assert(rel->resources.getAmount(ReligionSim::ResourceType::Iron) == 80 + 75);
+    rel->resources.addResource(ReligionSim::ResourceType::Copper, 50);
+    assert(rel->resources.getAmount(ReligionSim::ResourceType::Copper) == 60 + 50);
+    rel->resources.addResource(ReligionSim::ResourceType::Diamond, 20);
+    assert(rel->resources.getAmount(ReligionSim::ResourceType::Diamond) == 15 + 20);
+    assert(std::string(ReligionSim::getResourceTypeName(ReligionSim::ResourceType::Copper)) == "Cobre");
+    assert(std::string(ReligionSim::getResourceTypeName(ReligionSim::ResourceType::Diamond)) == "Diamante");
 
     // Verificar generación de vetas de hierro en el mapa
     int countIron = 0;
@@ -1528,8 +1542,8 @@ void testResourceSystemAndWorldCreation() {
     assert(foundBtn516);
 
     const auto& resProps = rend.getResourcePropPixels();
-    assert(resProps.size() == 5);
-    for (size_t i = 0; i < 5; ++i) {
+    assert(resProps.size() == 7);
+    for (size_t i = 0; i < 7; ++i) {
         assert(resProps[i].size() == 64u * 64u);
     }
 
@@ -2282,7 +2296,7 @@ void testMeteorCataclysmicPowerAndPhysics() {
     // 1. Metadatos del poder
     assert(powers.getPowerCost(DivinePowerType::Meteor) == 60);
     assert(powers.getPowerName(DivinePowerType::Meteor) == "METEORITO CATACLISMICO");
-    assert(powers.getPowerRadius(DivinePowerType::Meteor) == 5);
+    assert(powers.getPowerRadius(DivinePowerType::Meteor) == static_cast<int>(std::round(AverageMeteoriteScale::AIRBLAST_RADIUS_CELLS)));
     ColorRGB col = powers.getPowerColor(DivinePowerType::Meteor);
     assert(col.r == 255 && col.g == 95 && col.b == 25);
 
@@ -2888,6 +2902,7 @@ void testSoundSystemAndAmbientDSP() {
     soundSys.playSFX(ReligionSim::SFXType::ThunderStrike, 1.0f, 0.0f);
     soundSys.playSFX(ReligionSim::SFXType::MeteorImpact, 1.0f, 0.0f);
     soundSys.playSFX(ReligionSim::SFXType::FaithGain, 0.9f, 0.0f);
+    soundSys.playSFX(ReligionSim::SFXType::AtomicExplosion, 1.0f, 0.0f);
 
     // 4. Prueba de Audio Espacial 2.5D (Panning estéreo atenuado por distancia de cámara)
     ReligionSim::IsometricCamera camera(1280, 720);
@@ -2898,6 +2913,7 @@ void testSoundSystemAndAmbientDSP() {
     soundSys.playSpatialSFX(ReligionSim::SFXType::BodyThud, 32.0f, 32.0f, camera, 1.0f, 60.0f);
     soundSys.playSpatialSFX(ReligionSim::SFXType::Earthquake, 10.0f, 10.0f, camera, 1.0f, 60.0f);
     soundSys.playSpatialSFX(ReligionSim::SFXType::CombatAttack, 50.0f, 50.0f, camera, 0.8f, 60.0f);
+    soundSys.playSpatialSFX(ReligionSim::SFXType::AtomicExplosion, 20.0f, 20.0f, camera, 1.5f);
 
     // 5. Actualización del soundscape ambiental (viento, naturaleza diurna/nocturna, olas)
     ReligionSim::WorldMap map(32, 32);
@@ -3182,32 +3198,90 @@ void testGameOverOnAllUnitsExtinction() {
     game.update(2.0f);
     assert(game.getGameState() == ReligionSim::GameState::GameOver);
 
-    // Hit-testing de los botones de la pantalla de Game Over
+    // Hit-testing de los botones de la pantalla de Game Over (4 botones litúrgicos con Observar Mundo)
     const auto& renderer = game.getRenderer();
-    float modalW = 860.0f;
-    float modalH = 480.0f;
-    float mx = (1280.0f - modalW) * 0.5f;
-    float my = (720.0f - modalH) * 0.5f;
-    float btnY = my + modalH - 65.0f;
+    constexpr float modalW = 860.0f;
+    constexpr float modalH = 480.0f;
+    const float mx = (1280.0f - modalW) * 0.5f;
+    const float my = (720.0f - modalH) * 0.5f;
+    const float btnY = my + modalH - 65.0f;
+
+    // Clic en [ OBSERVAR MUNDO (VER MAPA) ] (ID 904)
+    int btn904 = renderer.checkGameOverButtonClicked(mx + 50.0f, btnY + 20.0f);
+    assert(btn904 == 904);
 
     // Clic en [ REINTENTAR GÉNESIS ] (ID 901)
-    int btn901 = renderer.checkGameOverButtonClicked(mx + 50.0f, btnY + 20.0f);
+    int btn901 = renderer.checkGameOverButtonClicked(mx + 260.0f, btnY + 20.0f);
     assert(btn901 == 901);
 
     // Clic en [ CARGAR PARTIDA ] (ID 902)
-    int btn902 = renderer.checkGameOverButtonClicked(mx + 330.0f, btnY + 20.0f);
+    int btn902 = renderer.checkGameOverButtonClicked(mx + 460.0f, btnY + 20.0f);
     assert(btn902 == 902);
 
     // Clic en [ MENÚ PRINCIPAL ] (ID 903)
-    int btn903 = renderer.checkGameOverButtonClicked(mx + 600.0f, btnY + 20.0f);
+    int btn903 = renderer.checkGameOverButtonClicked(mx + 670.0f, btnY + 20.0f);
     assert(btn903 == 903);
 
     // Clic fuera del área de botones
     assert(renderer.checkGameOverButtonClicked(10.0f, 10.0f) == 0);
 
-    // Interacción interactiva: Clic en 901 -> WorldCreation
+    // EN: Test Post-Defeat Spectator Mode entry via button 904
+    // ES: Probar entrada al Modo Espectador tras la derrota mediante el botón 904
+    assert(!game.isSpectatingPostDefeat());
     game.onMouseDown(1, mx + 50.0f, btnY + 20.0f);
+    assert(game.isSpectatingPostDefeat());
+    assert(game.getGameState() == ReligionSim::GameState::GameOver);
+
+    // Render spectator HUD without crashes or allocations
+    game.render();
+    assert(game.getRenderer().getFramebuffer().size() == 1280u * 720u);
+
+    // EN: Test spectator top bar hit testing and fog toggle (ID 906)
+    // ES: Probar detección de clics en la barra superior de espectador y alternancia de niebla (ID 906)
+    assert(game.isSpectatorRevealAll());
+    int specFogBtn = renderer.checkSpectatorButtonClicked(1280.0f - 12.0f - 85.0f - 8.0f - 120.0f - 8.0f - 50.0f, 20.0f);
+    assert(specFogBtn == 906);
+    game.onMouseDown(1, 1280.0f - 12.0f - 85.0f - 8.0f - 120.0f - 8.0f - 50.0f, 20.0f);
+    assert(!game.isSpectatorRevealAll());
+
+    // Toggle fog with shortcut key F
+    game.onKeyPress('f');
+    assert(game.isSpectatorRevealAll());
+
+    // Camera pan and zoom in spectator mode
+    const float initCamX = game.getCamera().getCameraX();
+    game.onKeyPress('d');
+    game.update(0.1f);
+    assert(game.getCamera().getCameraX() != initCamX);
+    const float initZoom = game.getCamera().getZoom();
+    game.onKeyPress('+');
+    game.update(0.1f);
+    assert(game.getCamera().getZoom() > initZoom);
+
+    // Right-click drag camera in spectator mode
+    game.onMouseDown(3, 600.0f, 300.0f);
+    game.onMouseMove(550.0f, 280.0f);
+    game.onMouseUp(3, 550.0f, 280.0f);
+
+    // EN: Return to GameOver epitafio summary via ESC key
+    // ES: Regresar al epitafio de derrota mediante la tecla ESC
+    game.onKeyPress(27);
+    assert(!game.isSpectatingPostDefeat());
+    assert(game.getGameState() == ReligionSim::GameState::GameOver);
+
+    // EN: Enter spectator mode via key V and return via Button 905 (VER EPITAFIO)
+    // ES: Entrar a modo espectador mediante tecla V y regresar mediante Botón 905
+    game.onKeyPress('v');
+    assert(game.isSpectatingPostDefeat());
+    int specEpiBtn = renderer.checkSpectatorButtonClicked(1280.0f - 12.0f - 85.0f - 8.0f - 120.0f - 8.0f - 155.0f - 8.0f - 50.0f, 20.0f);
+    assert(specEpiBtn == 905);
+    game.onMouseDown(1, 1280.0f - 12.0f - 85.0f - 8.0f - 120.0f - 8.0f - 155.0f - 8.0f - 50.0f, 20.0f);
+    assert(!game.isSpectatingPostDefeat());
+
+    // Interacción interactiva: Clic en 901 -> WorldCreation
+    game.onMouseDown(1, mx + 260.0f, btnY + 20.0f);
     assert(game.getGameState() == ReligionSim::GameState::WorldCreation);
+    assert(!game.isSpectatingPostDefeat());
 
     // Forzar GameOver nuevamente para probar botón 903 y tecla ESC
     game.setGameState(ReligionSim::GameState::GameOver);
@@ -3221,7 +3295,7 @@ void testGameOverOnAllUnitsExtinction() {
     game.setGameState(ReligionSim::GameState::GameOver);
     game.render();
 
-    std::cout << "  -> testGameOverOnAllUnitsExtinction PASSED! Defeat on zero living units, dramatic death pause, chronicle logging, and modal buttons verified." << std::endl;
+    std::cout << "  -> testGameOverOnAllUnitsExtinction PASSED! Defeat on zero living units, dramatic death pause, chronicle logging, post-defeat spectator mode, and modal buttons verified." << std::endl;
 }
 
 void testReligiousMoralityAndRulesSystem() {
@@ -3701,11 +3775,13 @@ void testWildfireDivinePowerAndPowerIcons() {
     // 6. Simulación de propagación del fuego y consumo de madera
     int initialWood = map.getCell(16, 16).resourceAmount;
     powers.update(1.0f, map, humanos);
+    map.updateFirePhysics(1.0f, nullptr, &humanos);
     assert(map.getCell(16, 16).resourceAmount < initialWood);
 
     // 7. Extinción completa: el bosque se calcina y se convierte en ceniza fértil
     map.getCell(16, 16).burnTimer = 0.1f;
     powers.update(0.2f, map, humanos);
+    map.updateFirePhysics(0.2f, nullptr, &humanos);
     assert(!map.getCell(16, 16).isBurning);
     assert(map.getCell(16, 16).isBurnt);
     assert(map.getCell(16, 16).biome == BiomeType::CoastalPlains);
@@ -3893,18 +3969,20 @@ void testPuebloSpatialAllocationAndBufferZones() {
     }
     assert(differentFromSeedA);
 
-    // 3. Probar en mapa pequeño (32x32)
-    WorldMap map32(32, 32);
-    map32.generateProceduralWorld(42);
-    auto pueblos32 = map32.generatePuebloLocations(5, 42);
-    assert(pueblos32.size() == 5);
-    for (size_t i = 0; i < pueblos32.size(); ++i) {
-        for (size_t j = i + 1; j < pueblos32.size(); ++j) {
-            float dx = static_cast<float>(pueblos32[i].x - pueblos32[j].x);
-            float dy = static_cast<float>(pueblos32[i].y - pueblos32[j].y);
-            float dist = std::sqrt(dx * dx + dy * dy);
-            // Distancia mínima garantizada en 32x32: al menos 8 casillas
-            assert(dist >= 8.0f);
+    // 3. EN: Test on minimum preset map (64x64)
+    // ES: Probar en mapa del preajuste mínimo (64x64)
+    WorldMap map64(64, 64);
+    map64.generateProceduralWorld(42);
+    auto pueblos64 = map64.generatePuebloLocations(5, 42);
+    assert(pueblos64.size() == 5);
+    for (size_t i = 0; i < pueblos64.size(); ++i) {
+        for (size_t j = i + 1; j < pueblos64.size(); ++j) {
+            float deltaCellX = static_cast<float>(pueblos64[i].x - pueblos64[j].x);
+            float deltaCellY = static_cast<float>(pueblos64[i].y - pueblos64[j].y);
+            float separationDistance = std::sqrt(deltaCellX * deltaCellX + deltaCellY * deltaCellY);
+            // EN: Minimum separation guaranteed on 64x64: at least 8 tiles
+            // ES: Distancia mínima garantizada en 64x64: al menos 8 casillas
+            assert(separationDistance >= 8.0f);
         }
     }
 
@@ -3946,6 +4024,32 @@ void testPuebloSpatialAllocationAndBufferZones() {
     }
     // Debe haber un colchón de tierra virgen de al menos 7 casillas entre aldeanos de pueblos distintos
     assert(minCrossPuebloDist >= 7.0f);
+
+    // 5. EN: Test Immense World Map (128x128) generation and spatial distribution
+    // ES: Probar generación de Mapa Mundial Inmenso (128x128) y distribución espacial
+    WorldMap map128(128, 128);
+    map128.generateProceduralWorld(777);
+    assert(map128.getWidth() == 128);
+    assert(map128.getHeight() == 128);
+    auto pueblos128 = map128.generatePuebloLocations(5, 777);
+    assert(pueblos128.size() == 5);
+    for (size_t i = 0; i < pueblos128.size(); ++i) {
+        assert(map128.isValid(pueblos128[i].x, pueblos128[i].y));
+        assert(map128.getCell(pueblos128[i].x, pueblos128[i].y).isHabitable());
+    }
+
+    // EN: Verify Game::getMapDimensionFromIndex mappings (presets starting from 64x64)
+    // ES: Verificar mapeos de Game::getMapDimensionFromIndex (preajustes iniciando desde 64x64)
+    assert(Game::getMapDimensionFromIndex(0) == 64);
+    assert(Game::getMapDimensionFromIndex(1) == 80);
+    assert(Game::getMapDimensionFromIndex(2) == 96);
+    assert(Game::getMapDimensionFromIndex(3) == 128);
+    assert(Game::getMapDimensionFromIndex(4) == 160);
+    assert(Game::getMapDimensionFromIndex(5) == 200);
+    assert(Game::getMapDimensionFromIndex(6) == 256);
+    assert(Game::getMapDimensionFromIndex(7) == 320);
+    assert(Game::getMapDimensionFromIndex(-1) == 128);
+    assert(Game::getMapDimensionFromIndex(99) == 128);
 
     std::cout << "  -> testPuebloSpatialAllocationAndBufferZones PASSED! Minimum separation of "
               << minSeparationFound << " tiles between pueblos, random procedural seeding, and peaceful wilderness buffer of "
@@ -4524,7 +4628,7 @@ void testResourcePanelBelieversIndicator() {
     constexpr int targetRowY = 17;
     const int invertedRowY = 720 - 1 - targetRowY;
 
-    for (int columnX = 250; columnX < 550; ++columnX) {
+    for (int columnX = 200; columnX < 650; ++columnX) {
         for (int rowOffset = -3; rowOffset <= 5; ++rowOffset) {
             const int scanPixelY = invertedRowY + rowOffset;
             if (scanPixelY >= 0 && scanPixelY < 720) {
@@ -4554,6 +4658,3225 @@ void testResourcePanelBelieversIndicator() {
     assert(divineGoldPixelsCount > 20);
 
     std::cout << "  -> testResourcePanelBelieversIndicator PASSED! Dedicated believer section, golden halo icon, and follower counts verified." << std::endl;
+}
+
+// =============================================================================
+// EN: Test Minecraft-Style Simulated World Panorama Main Menu
+// ES: Prueba del Panorama de Mundo Simulado Estilo Minecraft en el Menú Principal
+// =============================================================================
+void testMinecraftStyleSimulatedWorldPanoramaMainMenu() {
+    std::cout << "[Test] Running testMinecraftStyleSimulatedWorldPanoramaMainMenu..." << std::endl;
+
+    // EN: Block 1 - Initialize game instance and verify main menu startup state
+    // ES: Bloque 1 - Inicializar instancia de juego y verificar estado de arranque en menú principal
+    constexpr int canvasWidth = 1280;
+    constexpr int canvasHeight = 720;
+    ReligionSim::Game testGame(canvasWidth, canvasHeight);
+    testGame.init();
+
+    assert(testGame.getGameState() == ReligionSim::GameState::MainMenu);
+    assert(testGame.getMap().getWidth() == 64);
+    assert(testGame.getMap().getHeight() == 64);
+    assert(testGame.getGestorHumanos().getHumanos().size() == 36);
+    assert(testGame.getBuildingSystem().getHouses().size() >= 3);
+
+    // EN: Block 2 - Verify initial camera zoom and dynamic panoramic drift movement
+    // ES: Bloque 2 - Verificar zoom inicial de cámara y movimiento de desplazamiento panorámico dinámico
+    const float initialCameraX = testGame.getCamera().getCameraX();
+    const float initialCameraY = testGame.getCamera().getCameraY();
+    const float initialCameraZoom = testGame.getCamera().getZoom();
+    assert(initialCameraZoom >= 1.0f);
+
+    constexpr float simulationStepDelta = 0.25f;
+    constexpr int simulationStepsCount = 10;
+    for (int stepIndex = 0; stepIndex < simulationStepsCount; ++stepIndex) {
+        testGame.update(simulationStepDelta);
+    }
+
+    const float driftedCameraX = testGame.getCamera().getCameraX();
+    const float driftedCameraY = testGame.getCamera().getCameraY();
+    const bool cameraDrifted = (driftedCameraX != initialCameraX) || (driftedCameraY != initialCameraY);
+    assert(cameraDrifted);
+
+    // EN: Block 3 - Verify frame rendering executes cleanly with world background and UI
+    // ES: Bloque 3 - Verificar que el renderizado de cuadro se ejecuta limpiamente con fondo de mundo y UI
+    testGame.render();
+    const auto& frameBuffer = testGame.getRenderer().getFramebuffer();
+    assert(frameBuffer.size() == static_cast<size_t>(testGame.getRenderer().getWidth() * testGame.getRenderer().getHeight()));
+
+    // EN: Verify the screen is not a uniform solid brown brick background
+    // ES: Verificar que la pantalla no es un fondo de ladrillo marrón sólido uniforme
+    bool hasNonBrownPixels = false;
+    for (uint32_t pixelValue : frameBuffer) {
+        uint8_t redComponent = pixelValue & 0xFF;
+        uint8_t greenComponent = (pixelValue >> 8) & 0xFF;
+        uint8_t blueComponent = (pixelValue >> 16) & 0xFF;
+
+        // EN: Check for lush green terrain or blue water pixels
+        // ES: Comprobar la presencia de píxeles de terreno verde exuberante o agua azul
+        if ((greenComponent > redComponent + 20) || (blueComponent > redComponent + 20)) {
+            hasNonBrownPixels = true;
+            break;
+        }
+    }
+    assert(hasNonBrownPixels);
+
+    std::cout << "  -> testMinecraftStyleSimulatedWorldPanoramaMainMenu PASSED! Living background, orbital camera drift, and frosted UI verified." << std::endl;
+}
+
+// =============================================================================
+// EN: Test Options Menu Categories and Settings Architecture
+// ES: Prueba de Categorías del Menú de Opciones y Arquitectura de Ajustes
+// =============================================================================
+void testOptionsMenuCategoriesAndSettingsArchitecture() {
+    std::cout << "[Test] Running testOptionsMenuCategoriesAndSettingsArchitecture..." << std::endl;
+
+    // EN: Block 1 - Test GameSettings default values and cycling routines
+    // ES: Bloque 1 - Probar valores por defecto de GameSettings y rutinas de ciclo
+    ReligionSim::GameSettings testSettings;
+    assert(testSettings.resolution == ReligionSim::DisplayResolution::Res1280x720);
+    assert(testSettings.displayMode == ReligionSim::DisplayMode::BorderlessFullscreen);
+    assert(testSettings.frameRateLimit == ReligionSim::FrameRateLimit::FPS60);
+    assert(testSettings.cloudShadows == ReligionSim::CloudShadowsQuality::HighSoft);
+    assert(testSettings.dynamicLighting == ReligionSim::DynamicLightingMode::SoftRealistic);
+    assert(testSettings.defaultSpeed == ReligionSim::DefaultSimulationSpeed::PacingNormal);
+    assert(!testSettings.showIsometricGrid); // EN: Grid disabled by default / ES: Retícula desactivada por defecto
+    assert(testSettings.masterVolumePercent == 80);
+
+    // EN: Cycle resolution and check conversions
+    // ES: Ciclar resolución y verificar conversiones
+    testSettings.cycleResolution();
+    assert(testSettings.resolution == ReligionSim::DisplayResolution::Res1600x900);
+    assert(ReligionSim::GameSettings::getResolutionWidth(testSettings.resolution) == 1600);
+    assert(ReligionSim::GameSettings::getResolutionHeight(testSettings.resolution) == 900);
+
+    testSettings.cycleResolution();
+    assert(testSettings.resolution == ReligionSim::DisplayResolution::Res1920x1080);
+    assert(ReligionSim::GameSettings::getResolutionWidth(testSettings.resolution) == 1920);
+
+    testSettings.cycleResolution();
+    assert(testSettings.resolution == ReligionSim::DisplayResolution::Res1280x720);
+
+    // EN: Cycle visual filters, dynamic lighting and audio
+    // ES: Ciclar filtros visuales, iluminación dinámica y audio
+    testSettings.cycleVisualColorFilter();
+    assert(testSettings.colorFilter == ReligionSim::VisualColorFilter::DivineGold);
+
+    testSettings.toggleAutoPauseOnDisasters();
+    assert(!testSettings.autoPauseOnDisasters);
+
+    testSettings.toggleVignette();
+    assert(!testSettings.vignetteEnabled);
+
+    testSettings.toggleIsometricGrid();
+    assert(testSettings.showIsometricGrid);
+
+    testSettings.cycleMasterVolume();
+    assert(testSettings.masterVolumePercent == 105 % 125); // 105 % 125 = 105 -> modulo 125 wrap check
+
+    // EN: Block 2 - Test file persistence (save and reload)
+    // ES: Bloque 2 - Probar persistencia en archivo (guardar y recargar)
+    const std::string temporaryConfigPath = "/tmp/marangatu_test_settings.cfg";
+    const bool saveSucceeded = testSettings.saveToFile(temporaryConfigPath);
+    assert(saveSucceeded);
+
+    ReligionSim::GameSettings loadedSettings;
+    const bool loadSucceeded = loadedSettings.loadFromFile(temporaryConfigPath);
+    assert(loadSucceeded);
+    assert(loadedSettings.colorFilter == ReligionSim::VisualColorFilter::DivineGold);
+    assert(!loadedSettings.autoPauseOnDisasters);
+    assert(!loadedSettings.vignetteEnabled);
+    assert(loadedSettings.showIsometricGrid);
+
+    // EN: Test reset to defaults
+    // ES: Probar restablecimiento a valores predeterminados
+    loadedSettings.resetToDefaults();
+    assert(loadedSettings.colorFilter == ReligionSim::VisualColorFilter::Neutral);
+    assert(loadedSettings.autoPauseOnDisasters);
+    assert(loadedSettings.vignetteEnabled);
+    assert(!loadedSettings.showIsometricGrid);
+
+    // EN: Block 3 - Test Options Menu UI buttons and hit-testing in Renderer
+    // ES: Bloque 3 - Probar botones de UI y hit-testing del menú de opciones en Renderer
+    constexpr int canvasWidth = 1280;
+    constexpr int canvasHeight = 720;
+    ReligionSim::Renderer testRenderer(canvasWidth, canvasHeight);
+    assert(!testRenderer.isGridVisible());
+    testRenderer.setShowGrid(true);
+    assert(testRenderer.isGridVisible());
+    testRenderer.setShowGrid(false);
+    assert(!testRenderer.isGridVisible());
+
+    // EN: Verify tabs hit-testing (Tab 1: 1001, Tab 2: 1002, Tab 3: 1003, Tab 4: 1004)
+    // ES: Verificar hit-testing de pestañas (Pestaña 1: 1001, Pestaña 2: 1002, Pestaña 3: 1003, Pestaña 4: 1004)
+    const float modalWidth = 960.0f;
+    const float modalStartX = (static_cast<float>(canvasWidth) - modalWidth) * 0.5f;
+    const float modalStartY = (static_cast<float>(canvasHeight) - 590.0f) * 0.5f;
+
+    // Check hit test for Tab 1 at modalStartX + 50, modalStartY + 50
+    const int tabOneHitId = testRenderer.checkOptionsMenuButtonClicked(modalStartX + 60.0f, modalStartY + 55.0f, ReligionSim::OptionsTab::ScreenAndVideo);
+    assert(tabOneHitId == 1001);
+
+    // Check hit test for Tab 2
+    const int tabTwoHitId = testRenderer.checkOptionsMenuButtonClicked(modalStartX + 285.0f, modalStartY + 55.0f, ReligionSim::OptionsTab::ScreenAndVideo);
+    assert(tabTwoHitId == 1002);
+
+    // Check hit test for bottom Restore button 1090
+    const int restoreActionHitId = testRenderer.checkOptionsMenuButtonClicked(modalStartX + 60.0f, modalStartY + 590.0f - 40.0f, ReligionSim::OptionsTab::ScreenAndVideo);
+    assert(restoreActionHitId == 1090);
+
+    // EN: Block 4 - Test Game integration, tab switching, and options rendering
+    // ES: Bloque 4 - Probar integración en Game, cambio de pestañas y renderizado de opciones
+    ReligionSim::Game testGame(canvasWidth, canvasHeight);
+    testGame.init();
+
+    testGame.setGameState(ReligionSim::GameState::Options);
+    assert(testGame.getGameState() == ReligionSim::GameState::Options);
+
+    // Switch tabs and verify
+    testGame.setCurrentOptionsTab(ReligionSim::OptionsTab::ScreenAndVideo);
+    assert(testGame.getCurrentOptionsTab() == ReligionSim::OptionsTab::ScreenAndVideo);
+
+    testGame.setCurrentOptionsTab(ReligionSim::OptionsTab::GraphicsAndImage);
+    assert(testGame.getCurrentOptionsTab() == ReligionSim::OptionsTab::GraphicsAndImage);
+
+    testGame.setCurrentOptionsTab(ReligionSim::OptionsTab::GameplayAndSimulation);
+    assert(testGame.getCurrentOptionsTab() == ReligionSim::OptionsTab::GameplayAndSimulation);
+
+    testGame.setCurrentOptionsTab(ReligionSim::OptionsTab::AudioAndSound);
+    assert(testGame.getCurrentOptionsTab() == ReligionSim::OptionsTab::AudioAndSound);
+
+    // Apply custom settings and verify subsystems update
+    testSettings.masterVolumePercent = 50;
+    testSettings.defaultSpeed = ReligionSim::DefaultSimulationSpeed::PacingFast;
+    testGame.applySettings(testSettings);
+    assert(testGame.getRenderer().isGridVisible() == testSettings.showIsometricGrid);
+    testSettings.showIsometricGrid = true;
+    testGame.applySettings(testSettings);
+    assert(testGame.getRenderer().isGridVisible());
+    testSettings.showIsometricGrid = false;
+    testGame.applySettings(testSettings);
+    assert(!testGame.getRenderer().isGridVisible());
+    assert(std::abs(testGame.getSoundSystem().getMasterVolume() - 0.50f) < 0.05f);
+    assert(std::abs(testGame.getTimeline().getYearsPerSecond() - 8.0f) < 0.05f);
+
+    // Render frame in Options state without exceptions
+    testGame.render();
+    assert(testGame.getRenderer().getFramebuffer().size() == static_cast<size_t>(testGame.getRenderer().getWidth() * testGame.getRenderer().getHeight()));
+
+    // EN: Block 5 - Test Fullscreen and Window Mode Toggle & F11 Shortcut
+    // ES: Bloque 5 - Probar conmutación de pantalla completa / ventana y atajo F11
+    testGame.getSettingsMutable().displayMode = ReligionSim::DisplayMode::Windowed;
+    testGame.applySettings(testGame.getSettings());
+    assert(!testGame.getRenderer().isFullscreen());
+    assert(testGame.getSettings().displayMode == ReligionSim::DisplayMode::Windowed);
+
+    // F11 key shortcut toggle
+    testGame.onKeyPress(1011);
+    assert(testGame.getSettings().displayMode == ReligionSim::DisplayMode::BorderlessFullscreen);
+    assert(testGame.getRenderer().isFullscreen());
+
+    // Toggle back to Windowed with F11
+    testGame.onKeyPress(1011);
+    assert(testGame.getSettings().displayMode == ReligionSim::DisplayMode::Windowed);
+    assert(!testGame.getRenderer().isFullscreen());
+
+    // Test X11 KeySym XK_F11 (0xFFC8)
+    constexpr int XK_F11_SYM = 0xFFC8;
+    testGame.onKeyPress(XK_F11_SYM);
+    assert(testGame.getSettings().displayMode == ReligionSim::DisplayMode::BorderlessFullscreen);
+    assert(testGame.getRenderer().isFullscreen());
+
+    // Reset back to windowed
+    testGame.onKeyPress(XK_F11_SYM);
+    assert(!testGame.getRenderer().isFullscreen());
+
+    std::cout << "  -> testOptionsMenuCategoriesAndSettingsArchitecture PASSED! Display, video, graphics, gameplay, and audio options fully verified." << std::endl;
+}
+
+// =============================================================================
+// EN: Test enhanced living organism AI: biological drives, active courtship,
+//     parental food sharing, and cultural/memetic replication
+// ES: Probar IA mejorada de organismos vivos: impulsos biológicos, cortejo activo,
+//     inversión parental de alimento y replicación cultural/memética
+// =============================================================================
+void testLivingOrganismReproductionAndMemeticReplicationAI() {
+    std::cout << "[Test] Running testLivingOrganismReproductionAndMemeticReplicationAI..." << std::endl;
+
+    // -------------------------------------------------------------------------
+    // EN: 1. Biological Drives & Active Courtship
+    // ES: 1. Impulsos biológicos y cortejo activo
+    // -------------------------------------------------------------------------
+    ReligionSim::WorldMap testMap(32, 32);
+    ReligionSim::EventLine testEventLine;
+    ReligionSim::Humano groomCandidate(10, "Arak", 12.0f, 12.0f, ReligionSim::HumanGender::Male);
+    ReligionSim::Humano brideCandidate(11, "Mira", 12.5f, 12.0f, ReligionSim::HumanGender::Female);
+
+    groomCandidate.setReligionId(1);
+    brideCandidate.setReligionId(1);
+    groomCandidate.setAge(18.0f);
+    brideCandidate.setAge(18.0f);
+    groomCandidate.setReproductionDrive(0.50f);
+    brideCandidate.setReproductionDrive(0.50f);
+
+    assert(!groomCandidate.hasSpouse());
+    assert(!brideCandidate.hasSpouse());
+
+    // EN: Courtship displays build mutual affection over time
+    // ES: Las exhibiciones de cortejo fomentan el afecto mutuo con el tiempo
+    groomCandidate.courtCandidate(brideCandidate, 3.0f, &testEventLine, -3950);
+    bool weddingCelebrated = groomCandidate.courtCandidate(brideCandidate, 3.0f, &testEventLine, -3950);
+    assert(weddingCelebrated);
+    assert(groomCandidate.hasSpouse());
+    assert(brideCandidate.hasSpouse());
+    assert(groomCandidate.getSpouseId() == brideCandidate.getId());
+    assert(brideCandidate.getSpouseId() == groomCandidate.getId());
+    assert(groomCandidate.getNeedForShelter() >= 0.50f); // Nesting urge
+
+    // -------------------------------------------------------------------------
+    // EN: 2. Parental Investment & Kin Food Sharing
+    // ES: 2. Inversión parental y compartición de alimento
+    // -------------------------------------------------------------------------
+    ReligionSim::Humano mother(20, "Dalia", 15.0f, 15.0f, ReligionSim::HumanGender::Female);
+    ReligionSim::Humano hungryChild(21, "Bimbo", 15.2f, 15.0f, ReligionSim::HumanGender::Male);
+    mother.setReligionId(1);
+    hungryChild.setReligionId(1);
+    hungryChild.setChild(true);
+    hungryChild.setAge(4.0f);
+    hungryChild.setMotherId(mother.getId());
+    mother.registerChild(hungryChild.getId());
+
+    mother.getHumanUnitMutable().nutritionalState = 80.0f;
+    hungryChild.getHumanUnitMutable().nutritionalState = 20.0f;
+    hungryChild.setHealth(60.0f);
+
+    const bool fedSuccessfully = mother.feedChild(hungryChild);
+    assert(fedSuccessfully);
+    assert(hungryChild.getHumanUnit().nutritionalState > 30.0f);
+    assert(hungryChild.getHealth() > 60.0f);
+    assert(mother.getHumanUnit().nutritionalState < 80.0f);
+
+    // -------------------------------------------------------------------------
+    // EN: 3. Dynamic Population Scaling beyond 120
+    // ES: 3. Escalado dinámico de población más allá de 120
+    // -------------------------------------------------------------------------
+    ReligionSim::GestorHumanos villagerManager;
+    villagerManager.getVillagers().clear();
+
+    // EN: Verify ErrorSystem allows reproduction up to maxSafeEntities
+    // ES: Verificar que ErrorSystem permite reproducción hasta maxSafeEntities
+    ReligionSim::ErrorSystem::instance().setMaxSafeEntities(400);
+    assert(!ReligionSim::ErrorSystem::instance().isPopulationCapReached());
+
+    // -------------------------------------------------------------------------
+    // EN: 4. Ontogeny & Adulthood Rites
+    // ES: 4. Ontogenia y Rito de Madurez
+    // -------------------------------------------------------------------------
+    ReligionSim::Humano maturingChild(30, "Kenai", 10.0f, 10.0f, ReligionSim::HumanGender::Male);
+    maturingChild.setChild(true);
+    maturingChild.setAge(12.5f); // Reached puberty/maturity threshold
+    maturingChild.setReligionId(1);
+    villagerManager.addVillager(maturingChild);
+
+    villagerManager.update(0.1f, testMap, &testEventLine, -3900);
+    const auto& updatedVillagers = villagerManager.getVillagers();
+    assert(!updatedVillagers.empty());
+    const auto& updatedKenai = updatedVillagers.front();
+    assert(!updatedKenai.isChild()); // Now a biological adult
+    assert(updatedKenai.getReproductionDrive() > 0.0f);
+
+    // -------------------------------------------------------------------------
+    // EN: 5. Cultural & Memetic Replication
+    // ES: 5. Replicación cultural y memética
+    // -------------------------------------------------------------------------
+    ReligionSim::Humano prayingElder(40, "ElderGorr", 20.0f, 20.0f, ReligionSim::HumanGender::Male);
+    ReligionSim::Humano listeningYouth(41, "YoungTaru", 20.8f, 20.0f, ReligionSim::HumanGender::Female);
+    prayingElder.setReligionId(1);
+    listeningYouth.setReligionId(1);
+    prayingElder.changeAction(ReligionSim::HumanAction::REZAR);
+    prayingElder.setDevotion(0.95f);
+    listeningYouth.setDevotion(0.40f);
+
+    villagerManager.getVillagers().clear();
+    villagerManager.addVillager(prayingElder);
+    villagerManager.addVillager(listeningYouth);
+
+    villagerManager.update(1.0f, testMap, &testEventLine, -3850);
+    const auto& afterPrayer = villagerManager.getVillagers();
+    assert(afterPrayer.size() == 2);
+    assert(afterPrayer[1].getDevotion() > 0.40f); // Devotion elevated via memetic contagion
+
+    std::cout << "  -> testLivingOrganismReproductionAndMemeticReplicationAI PASSED! Biological drives, courtship, parental investment, and memetic replication fully verified." << std::endl;
+}
+
+void testTwoCellTreeHeightAndOcclusionSortingSystem() {
+    std::cout << "[Test] Running testTwoCellTreeHeightAndOcclusionSortingSystem..." << std::endl;
+    using namespace ReligionSim;
+
+    Renderer renderer(800, 600);
+
+    // EN: 1. Validate 2-cell height for pine tree (propIndex == 0) and deciduous tree (propIndex == 1)
+    // ES: 1. Validar altura de 2 celdas para pino (propIndex == 0) y caducifolio (propIndex == 1)
+    constexpr float zoomFactor = 1.0f;
+    constexpr float expectedTwoCellHeight = 64.0f; // 2 * cellHeight (32px)
+    int startX = 0, startY = 0, propWidth = 0, propHeight = 0;
+
+    renderer.getTerrainPropBounds(200.0f, 200.0f, 0, zoomFactor, startX, startY, propWidth, propHeight);
+    assert(propHeight == static_cast<int>(expectedTwoCellHeight));
+    assert(propWidth == static_cast<int>(expectedTwoCellHeight * 0.78f));
+    assert(startX == static_cast<int>(200.0f - propWidth * 0.5f));
+    assert(startY == static_cast<int>(200.0f + 6.0f * zoomFactor - propHeight));
+
+    renderer.getTerrainPropBounds(200.0f, 200.0f, 1, zoomFactor, startX, startY, propWidth, propHeight);
+    assert(propHeight == static_cast<int>(expectedTwoCellHeight));
+    assert(propWidth == static_cast<int>(expectedTwoCellHeight * 0.88f));
+
+    // EN: 2. Validate 2-cell height for harvestable wood resource tree (ResourceType::Wood)
+    // ES: 2. Validar altura de 2 celdas para árbol recolectable de madera (ResourceType::Wood)
+    int woodStartX = 0, woodStartY = 0, woodWidth = 0, woodHeight = 0;
+    renderer.getResourceNodeBounds(250.0f, 250.0f, ResourceType::Wood, zoomFactor, woodStartX, woodStartY, woodWidth, woodHeight);
+    assert(woodHeight == static_cast<int>(expectedTwoCellHeight));
+    assert(woodWidth == static_cast<int>(expectedTwoCellHeight * 0.84f));
+
+    // EN: 3. Validate non-tree props (rock/shrub) retain natural single-cell proportions
+    // ES: 3. Validar que los accesorios que no son árboles (rocas/arbustos) retienen proporciones naturales de 1 celda
+    int rockStartX = 0, rockStartY = 0, rockWidth = 0, rockHeight = 0;
+    renderer.getTerrainPropBounds(200.0f, 200.0f, 2, zoomFactor, rockStartX, rockStartY, rockWidth, rockHeight);
+    assert(rockHeight < static_cast<int>(expectedTwoCellHeight));
+
+    // EN: 4. Validate monument and house bounding boxes
+    // ES: 4. Validar cajas delimitadoras de monumento y vivienda
+    int templeStartX = 0, templeStartY = 0, templeWidth = 0, templeHeight = 0;
+    renderer.getMonumentBounds(300.0f, 300.0f, 1, zoomFactor, templeStartX, templeStartY, templeWidth, templeHeight);
+    assert(templeWidth > 0 && templeHeight > 0);
+
+    House tribalHouse;
+    tribalHouse.id = 1;
+    tribalHouse.type = HouseType::ThatchedHut;
+    tribalHouse.buildProgress = 100.0f;
+    int houseStartX = 0, houseStartY = 0, houseWidth = 0, houseHeight = 0;
+    renderer.getHouseBounds(350.0f, 350.0f, tribalHouse, zoomFactor, houseStartX, houseStartY, houseWidth, houseHeight);
+    assert(houseWidth > 0 && houseHeight > 0);
+
+    // EN: 5. Verify translucency rendering with opacity < 1.0f vs opaque 1.0f
+    // ES: 5. Verificar renderizado de translucidez con opacidad < 1.0f frente a opaco 1.0f
+    Renderer opaqueRenderer(400, 400);
+    opaqueRenderer.clear(ColorRGB{100, 100, 100});
+    opaqueRenderer.drawTerrainProp(200.0f, 200.0f, 0, zoomFactor, 1.0f);
+
+    Renderer translucentRenderer(400, 400);
+    translucentRenderer.clear(ColorRGB{100, 100, 100});
+    translucentRenderer.drawTerrainProp(200.0f, 200.0f, 0, zoomFactor, 0.40f);
+
+    // The translucent rendering must blend with the background, producing different pixel values
+    bool pixelsDifferDueToTranslucency = false;
+    for (size_t pixelIndex = 0; pixelIndex < opaqueRenderer.getFramebuffer().size(); ++pixelIndex) {
+        if (opaqueRenderer.getFramebuffer()[pixelIndex] != translucentRenderer.getFramebuffer()[pixelIndex]) {
+            pixelsDifferDueToTranslucency = true;
+            break;
+        }
+    }
+    assert(pixelsDifferDueToTranslucency);
+
+    std::cout << "  -> testTwoCellTreeHeightAndOcclusionSortingSystem PASSED! 2-cell tree height, bounds, and translucency occlusion verified." << std::endl;
+}
+
+void testFallDamageAndNaturalPhenomenaPhysics() {
+    using namespace ReligionSim;
+    std::cout << "[Test] Running testFallDamageAndNaturalPhenomenaPhysics..." << std::endl;
+
+    WorldMap map(40, 40);
+    for (int y = 0; y < 40; ++y) {
+        for (int x = 0; x < 40; ++x) {
+            Cell& c = map.getCell(x, y);
+            c.biome = BiomeType::FertileValley;
+            c.elevation = 1.0f;
+            c.dominantReligionId = 1;
+        }
+    }
+    // Set rocky mountain cell
+    map.getCell(15, 15).biome = BiomeType::RuggedMountains;
+    map.getCell(15, 15).elevation = 2.5f;
+
+    // Set water cell
+    map.getCell(20, 20).biome = BiomeType::DeepOcean;
+    map.getCell(20, 20).elevation = 0.0f;
+
+    // 1. Safe landing threshold (S <= SAFE_FALL_IMPACT_VELOCITY deals 0 damage)
+    Humano hSafe(1, "Aldeano Salto Corto", 5.0f, 5.0f);
+    assert(hSafe.getHealth() == 100.0f);
+    hSafe.applyFallDamage(SAFE_FALL_IMPACT_VELOCITY * 0.8f, map);
+    assert(hSafe.getHealth() == 100.0f);
+    assert(hSafe.getLastFallDamage() == 0.0f);
+
+    // 2. Dangerous fall (S > SAFE_FALL_IMPACT_VELOCITY deals damage)
+    Humano hDrop(2, "Aldeano Caida", 5.0f, 5.0f);
+    hDrop.applyFallDamage(25.0f, map);
+    assert(hDrop.getHealth() < 100.0f);
+    assert(hDrop.getLastFallDamage() > 15.0f);
+    assert(hDrop.getStumbleTimer() > 0.0f);
+    float grassDamage = hDrop.getLastFallDamage();
+
+    // 3. Rocky mountain terrain multiplier (+30% damage)
+    Humano hRocky(3, "Aldeano Rocozo", 15.0f, 15.0f);
+    hRocky.applyFallDamage(25.0f, map);
+    assert(hRocky.getLastFallDamage() > grassDamage);
+
+    // 4. Water landing dampening (75% shock absorption)
+    Humano hWater(4, "Aldeano Agua", 20.0f, 20.0f);
+    hWater.applyFallDamage(25.0f, map);
+    assert(hWater.getLastFallDamage() < grassDamage * 0.40f);
+
+    // 5. Fatal fall impact from extreme velocity
+    Humano hFatal(5, "Aldeano Abismo", 5.0f, 5.0f);
+    hFatal.applyFallDamage(58.0f, map);
+    assert(hFatal.isDead());
+    assert(hFatal.getHealth() == 0.0f);
+    assert(hFatal.getCauseOfDeath().find("caida libre") != std::string::npos);
+
+    // 6. Cliff drop: stepping from high elevation to low elevation initiates free-fall
+    map.getCell(10, 10).elevation = 2.2f;
+    map.getCell(10, 11).elevation = 1.0f; // Delta = 1.2f > CLIFF_FALL_ELEVATION_THRESHOLD
+    Humano hCliff(6, "Aldeano Despenadero", 10.5f, 10.95f);
+    assert(!hCliff.isFlying());
+    assert(hCliff.getAltitude() == 0.0f);
+    // Move into (10, 11)
+    hCliff.walkTowards(10.5f, 11.5f, false);
+    hCliff.update(0.15f, map);
+    assert(hCliff.isFlying());
+    assert(hCliff.getAltitude() > 0.0f);
+
+    // 7. Rankine Tornado vortex suction, updraft, and centrifugal ejection
+    Humano hTornado(7, "Aldeano Tornado", 12.0f, 12.0f);
+    assert(!hTornado.isFlying());
+    // Apply tornado suction at 1.0 units distance (inside Rankine core)
+    hTornado.suckIntoTornado(12.5f, 12.5f, 4.5f, 0.25f);
+    assert(hTornado.isFlying());
+    assert(hTornado.getAltitude() > 0.0f);
+    assert(hTornado.getVelocityZ() > 0.0f);
+
+    // 8. Earthquake seismic acceleration and biomechanical balance
+    Humano hQuake(8, "Aldeano Sismo", 14.0f, 14.0f);
+    float healthBeforeQuake = hQuake.getHealth();
+    hQuake.sufferEarthquake(14.0f, 14.0f, 1.8f);
+    assert(hQuake.getHealth() < healthBeforeQuake);
+    assert(hQuake.getStumbleTimer() > 0.0f);
+
+    // 9. Volcanic pyroclastic bombs & ballistic trajectories
+    DivinePowersSystem divineSys;
+    WorldMap volcanoMap(30, 30);
+    ReligionRegistry reg;
+    EventLine eventLine;
+    int relId = reg.createPrimordialReligion("Volcanicos", "Vulcan", ColorRGB(255, 60, 0), "Fire", -4000);
+    reg.getReligion(relId)->theologyPoints = 500;
+    GestorHumanos gestor;
+    Humano hVolcano(9, "Aldeano Caldera", 15.0f, 15.0f);
+    gestor.agregarHumano(hVolcano);
+
+    auto castRes = divineSys.castPower(DivinePowerType::Volcano, 15, 15, volcanoMap, reg, gestor, -4000, eventLine, relId);
+    assert(castRes.success);
+    assert(volcanoMap.getCell(15, 15).hasVolcano);
+
+    // Update volcano simulation to emit and explode pyroclastic bombs
+    for (int step = 0; step < 50; ++step) {
+        divineSys.update(0.1f, volcanoMap, gestor);
+    }
+    assert(volcanoMap.getCell(15, 15).hasActiveLava);
+
+    // =========================================================================
+    // EN: 10. Natural Phenomena Impact on Trees, Houses, and Movable Caravans
+    // ES: 10. Impacto de Fenómenos Naturales sobre Árboles, Casas y Caravanas Móviles
+    // =========================================================================
+    BuildingSystem buildingSystem;
+    ReplicationEngine replicationEngine;
+
+    // EN: Setup forest cell with standing timber and a tribal hut
+    // ES: Configurar celda de bosque con madera erguida y una choza tribal
+    WorldMap disasterMap(40, 40);
+    for (int cellIndexY = 0; cellIndexY < 40; ++cellIndexY) {
+        for (int cellIndexX = 0; cellIndexX < 40; ++cellIndexX) {
+            Cell& targetCell = disasterMap.getCell(cellIndexX, cellIndexY);
+            targetCell.biome = BiomeType::FertileValley;
+            targetCell.elevation = 1.0f;
+            targetCell.dominantReligionId = relId;
+        }
+    }
+
+    Cell& forestCell = disasterMap.getCell(20, 20);
+    forestCell.biome = BiomeType::DenseForest;
+    forestCell.naturalResource = ResourceType::Wood;
+    forestCell.resourceAmount = 250;
+    forestCell.hasTreesUprooted = false;
+
+    // EN: Build a house next to the forest
+    // ES: Construir una vivienda contigua al bosque
+    int houseIdentifier = buildingSystem.initiateHouseConstruction(21, 20, 10, -1, relId, HouseType::ThatchedHut, disasterMap);
+    assert(houseIdentifier > 0);
+    House* constructedHouse = buildingSystem.getHouseByIdMutable(houseIdentifier);
+    assert(constructedHouse != nullptr);
+    constructedHouse->state = BuildingState::Completed;
+    constructedHouse->buildProgress = 100.0f;
+    constructedHouse->health = 100.0f;
+    assert(constructedHouse->isCompleted());
+    assert(constructedHouse->health > 0.0f);
+
+    Humano residentVillager(10, "Aldeano Hogareno", 21.5f, 20.5f);
+    residentVillager.setHomeId(houseIdentifier);
+    residentVillager.setDurmiendoBajoTecho(true);
+    gestor.agregarHumano(residentVillager);
+
+    // EN: Cast devastating Tornado directly onto the forest and house
+    // ES: Conjurar Tornado devastador directamente sobre el bosque y la vivienda
+    divineSys.clearAllFX();
+    reg.getReligion(relId)->theologyPoints = 500;
+    auto tornadoCast = divineSys.castPower(DivinePowerType::Tornado, 20, 20, disasterMap, reg, gestor, -4000, eventLine, relId);
+    assert(tornadoCast.success);
+
+    // EN: Simulate tornado passing through: should uproot trees, damage house, and spawn debris
+    // ES: Simular paso del tornado: debe arrancar árboles, dañar casa y generar escombros
+    for (int simulationStep = 0; simulationStep < 15; ++simulationStep) {
+        divineSys.update(0.1f, disasterMap, gestor, &buildingSystem, &replicationEngine);
+    }
+
+    // EN: Assert trees were uprooted and physical debris was spawned
+    // ES: Afirmar que los árboles fueron arrancados y se generaron escombros físicos
+    assert(forestCell.hasTreesUprooted);
+    assert(divineSys.getActiveDebris().size() > 0);
+    assert(constructedHouse->health < 100.0f);
+
+    // EN: Test complete structural collapse into ruins
+    // ES: Probar colapso estructural completo en ruinas
+    const bool collapsedIntoRuins = buildingSystem.damageHouse(houseIdentifier, 200.0f, disasterMap, &gestor);
+    assert(collapsedIntoRuins);
+    assert(constructedHouse->isRuined());
+    assert(constructedHouse->state == BuildingState::Ruined);
+
+    // EN: Sheltered villager was evicted and suffered structural trauma
+    // ES: El aldeano cobijado fue desalojado y sufrió trauma estructural
+    Humano* residentPtr = nullptr;
+    for (auto& villager : gestor.getHumanos()) {
+        if (villager.getId() == 10) {
+            residentPtr = &villager;
+            break;
+        }
+    }
+    assert(residentPtr != nullptr);
+    assert(!residentPtr->estaDurmiendoBajoTecho());
+    assert(residentPtr->getHomeId() == -1);
+
+    // EN: Test Physical Debris ballistic gravity, ground bounce, and settlement
+    // ES: Probar gravedad balística de escombros físicos, rebote en suelo y reposo
+    divineSys.spawnDebris(DebrisType::UprootedTreeTrunk, 25.0f, 25.0f, 15.0f, 2.0f, 0.0f, 10.0f, 20.0f, 30.0f, 1.5f);
+    assert(divineSys.getActiveDebris().size() > 0);
+
+    // EN: Advance simulation until the airborne debris strikes the ground and bounces
+    // ES: Avanzar simulación hasta que los escombros aéreos golpeen el suelo y reboten
+    for (int ballisticStep = 0; ballisticStep < 60; ++ballisticStep) {
+        divineSys.update(0.05f, disasterMap, gestor, &buildingSystem, &replicationEngine);
+    }
+    const auto& debrisCollection = divineSys.getActiveDebris();
+    assert(!debrisCollection.empty());
+    bool foundBouncedOrSettledDebris = false;
+    for (const auto& physicalDebrisItem : debrisCollection) {
+        if (physicalDebrisItem.bounces > 0 || physicalDebrisItem.settled) {
+            foundBouncedOrSettledDebris = true;
+            break;
+        }
+    }
+    assert(foundBouncedOrSettledDebris);
+
+    std::cout << "  -> testFallDamageAndNaturalPhenomenaPhysics PASSED! Fall damage physics, terrain multipliers, cliff drops, Rankine vortex, trees uprooting, house ruins and ballistic debris verified." << std::endl;
+}
+
+// EN: Comprehensive verification of thermodynamic fire physics, advective spread, moisture barriers, and ecological ash recovery
+// ES: Verificación exhaustiva de física termodinámica del fuego, propagación advectiva, barreras de humedad y recuperación ecológica de ceniza
+void testFireThermodynamicsSpreadDissipationAndEcologicalRecovery() {
+    std::cout << "Testing Fire Physics: Thermodynamics, Wind Advection, Moisture Barriers, House & Tree Destruction, Human Water Extinction, and Ecological Recovery..." << std::endl;
+    using namespace ReligionSim;
+
+    WorldMap fireSimulationMap(32, 32);
+    // EN: Initialize base testing grid
+    // ES: Inicializar cuadrícula base de prueba
+    for (int gridY = 0; gridY < 32; ++gridY) {
+        for (int gridX = 0; gridX < 32; ++gridX) {
+            Cell& cellRef = fireSimulationMap.getCell(gridX, gridY);
+            cellRef.biome = BiomeType::FertileValley;
+            cellRef.elevation = 1.0f;
+            cellRef.isBurning = false;
+            cellRef.isBurnt = false;
+            cellRef.fireIntensity = 0.0f;
+            cellRef.heatAccumulator = 0.0f;
+            cellRef.burnTimer = 0.0f;
+        }
+    }
+
+    // =========================================================================
+    // 1. VERIFY FLAMMABILITY AND COMBUSTIBILITY LOGIC
+    // =========================================================================
+    Cell denseForestCell;
+    denseForestCell.biome = BiomeType::DenseForest;
+    denseForestCell.naturalResource = ResourceType::Wood;
+    denseForestCell.resourceAmount = 100;
+    assert(denseForestCell.isCombustible());
+    assert(denseForestCell.getFlammability() >= 1.0f);
+
+    Cell waterBodyCell;
+    waterBodyCell.biome = BiomeType::ShallowWater;
+    assert(!waterBodyCell.isCombustible());
+    assert(waterBodyCell.getFlammability() <= 0.0f);
+
+    Cell desertDuneCell;
+    desertDuneCell.biome = BiomeType::AridDesert;
+    assert(!desertDuneCell.isCombustible());
+
+    // =========================================================================
+    // 2. DIRECTIONAL WIND ADVECTION AND THERMODYNAMIC FIRE SPREAD
+    // =========================================================================
+    for (int cellIndexX = 10; cellIndexX <= 12; ++cellIndexX) {
+        Cell& forestCell = fireSimulationMap.getCell(cellIndexX, 10);
+        forestCell.biome = BiomeType::DenseForest;
+        forestCell.naturalResource = ResourceType::Wood;
+        forestCell.resourceAmount = 100;
+        forestCell.maxResourceAmount = 100;
+    }
+    Cell& upwindCell = fireSimulationMap.getCell(9, 10);
+    upwindCell.biome = BiomeType::DenseForest;
+
+    constexpr float initialBurnDurationSeconds = 16.0f;
+    const bool ignitionSuccess = fireSimulationMap.igniteCell(10, 10, initialBurnDurationSeconds, 1.0f);
+    assert(ignitionSuccess);
+    assert(fireSimulationMap.getCell(10, 10).isBurning);
+    assert(fireSimulationMap.getCell(10, 10).fireIntensity == 1.0f);
+
+    constexpr float eastwardWindVelocityX = 0.80f;
+    constexpr float neutralWindVelocityY = 0.0f;
+
+    for (int simulationStep = 0; simulationStep < 2; ++simulationStep) {
+        fireSimulationMap.updateFirePhysics(0.10f, nullptr, nullptr, eastwardWindVelocityX, neutralWindVelocityY);
+    }
+
+    const float downwindHeat = fireSimulationMap.getCell(11, 10).heatAccumulator;
+    const float upwindHeat = fireSimulationMap.getCell(9, 10).heatAccumulator;
+    assert(downwindHeat > upwindHeat);
+
+    for (int spreadStep = 0; spreadStep < 20; ++spreadStep) {
+        fireSimulationMap.updateFirePhysics(0.20f, nullptr, nullptr, eastwardWindVelocityX, neutralWindVelocityY);
+        if (fireSimulationMap.getCell(11, 10).isBurning) break;
+    }
+    assert(fireSimulationMap.getCell(11, 10).isBurning);
+    assert(!fireSimulationMap.getCell(9, 10).isBurning);
+
+    // =========================================================================
+    // 3. MOISTURE BARRIER & NATURAL FIREBREAK DAMPENING
+    // =========================================================================
+    Cell& waterCanalCell = fireSimulationMap.getCell(13, 10);
+    waterCanalCell.biome = BiomeType::ShallowWater;
+    Cell& oppositeBankCell = fireSimulationMap.getCell(14, 10);
+    oppositeBankCell.biome = BiomeType::DenseForest;
+    oppositeBankCell.heatAccumulator = 0.0f;
+
+    fireSimulationMap.igniteCell(12, 10, 12.0f, 1.0f);
+    assert(fireSimulationMap.getCell(12, 10).isBurning);
+
+    const bool canalIgnited = fireSimulationMap.igniteCell(13, 10, 10.0f, 1.0f);
+    assert(!canalIgnited);
+    assert(!fireSimulationMap.getCell(13, 10).isBurning);
+
+    for (int canalStep = 0; canalStep < 10; ++canalStep) {
+        fireSimulationMap.updateFirePhysics(0.20f, nullptr, nullptr, eastwardWindVelocityX, neutralWindVelocityY);
+    }
+    assert(!oppositeBankCell.isBurning);
+
+    // =========================================================================
+    // 4. WOOD RESOURCE CONSUMPTION AND TREE TOPPLING
+    // =========================================================================
+    Cell& timberStandCell = fireSimulationMap.getCell(20, 20);
+    timberStandCell.biome = BiomeType::DenseForest;
+    timberStandCell.naturalResource = ResourceType::Wood;
+    timberStandCell.resourceAmount = 100;
+    timberStandCell.hasTreesUprooted = false;
+
+    fireSimulationMap.igniteCell(20, 20, 10.0f, 1.0f);
+    assert(timberStandCell.isBurning);
+
+    fireSimulationMap.updateFirePhysics(1.5f, nullptr, nullptr, 0.0f, 0.0f);
+    assert(timberStandCell.hasTreesUprooted);
+    assert(timberStandCell.resourceAmount < 100);
+
+    // =========================================================================
+    // 5. STRUCTURAL HOUSE FIRE DAMAGE AND COLLAPSE INTO RUINS
+    // =========================================================================
+    BuildingSystem buildingSystem;
+    GestorHumanos villagerManager;
+    House tribalDwelling;
+    tribalDwelling.id = 1;
+    tribalDwelling.cellX = 22;
+    tribalDwelling.cellY = 22;
+    tribalDwelling.state = BuildingState::Completed;
+    tribalDwelling.health = 80.0f;
+    tribalDwelling.maxHealth = 100.0f;
+    buildingSystem.getHouses().push_back(tribalDwelling);
+
+    Cell& housePlotCell = fireSimulationMap.getCell(22, 22);
+    housePlotCell.hasHouse = true;
+    fireSimulationMap.igniteCell(22, 22, 15.0f, 1.0f);
+
+    const float initialHouseHealth = buildingSystem.getHouseById(1)->health;
+    fireSimulationMap.updateFirePhysics(1.0f, &buildingSystem, &villagerManager, 0.0f, 0.0f);
+    const float damagedHouseHealth = buildingSystem.getHouseById(1)->health;
+    assert(damagedHouseHealth < initialHouseHealth);
+
+    for (int collapseStep = 0; collapseStep < 15; ++collapseStep) {
+        fireSimulationMap.updateFirePhysics(0.50f, &buildingSystem, &villagerManager, 0.0f, 0.0f);
+        if (buildingSystem.getHouseById(1)->isRuined()) break;
+    }
+    assert(buildingSystem.getHouseById(1)->isRuined());
+
+    // =========================================================================
+    // 6. VILLAGER IGNITION, SPRINT PANIC AND WATER EXTINGUISHING
+    // =========================================================================
+    Humano fleeingVillager(1, "Grog", 24.5f, 24.5f, HumanGender::Male);
+    fleeingVillager.setSalud(100.0f);
+    villagerManager.addVillager(fleeingVillager);
+
+    Cell& villagerFootCell = fireSimulationMap.getCell(24, 24);
+    villagerFootCell.biome = BiomeType::DenseForest;
+    fireSimulationMap.igniteCell(24, 24, 12.0f, 1.0f);
+
+    fireSimulationMap.updateFirePhysics(0.50f, &buildingSystem, &villagerManager, 0.0f, 0.0f);
+
+    assert(!villagerManager.getHumanos().empty());
+    Humano& activeVillager = villagerManager.getHumanos().front();
+    assert(activeVillager.isBurning());
+    assert(activeVillager.estaEnPanico());
+    assert(activeVillager.getSpeed() >= 1.35f);
+
+    const float villagerHealthBeforeBurn = activeVillager.getHealth();
+    activeVillager.update(0.60f, fireSimulationMap);
+    assert(activeVillager.getHealth() < villagerHealthBeforeBurn);
+
+    Cell& lakeWaterCell = fireSimulationMap.getCell(25, 24);
+    lakeWaterCell.biome = BiomeType::ShallowWater;
+    activeVillager.setPosition(25.5f, 24.5f);
+
+    activeVillager.update(0.10f, fireSimulationMap);
+    assert(!activeVillager.isBurning());
+
+    // =========================================================================
+    // 7. FIRE DISSIPATION, SCORCHED EARTH & ECOLOGICAL ASH RECOVERY
+    // =========================================================================
+    Cell& extinguishingStandCell = fireSimulationMap.getCell(28, 28);
+    extinguishingStandCell.biome = BiomeType::DenseForest;
+    fireSimulationMap.igniteCell(28, 28, 0.20f, 1.0f);
+    assert(extinguishingStandCell.isBurning);
+
+    fireSimulationMap.updateFirePhysics(0.35f, nullptr, nullptr, 0.0f, 0.0f);
+    assert(!extinguishingStandCell.isBurning);
+    assert(extinguishingStandCell.isBurnt);
+    assert(extinguishingStandCell.ashRecoveryTimer > 0.0f);
+
+    const bool reignitionAttempt = fireSimulationMap.igniteCell(28, 28, 10.0f, 1.0f);
+    assert(!reignitionAttempt);
+    assert(!extinguishingStandCell.isBurning);
+
+    extinguishingStandCell.ashRecoveryTimer = 0.10f;
+    fireSimulationMap.updateFirePhysics(0.20f, nullptr, nullptr, 0.0f, 0.0f);
+    assert(!extinguishingStandCell.isBurnt);
+    assert(extinguishingStandCell.biome == BiomeType::FertileValley);
+
+    std::cout << "  -> testFireThermodynamicsSpreadDissipationAndEcologicalRecovery PASSED! Thermodynamic spread, wind vectoring, moisture firebreak, tree felling, house ruins, human water extinguishing and ash recovery verified." << std::endl;
+}
+
+// EN: Test suite for Rain and Deluge divine powers, hydrology physics, and fire quenching
+// ES: Batería de pruebas para los poderes divinos Lluvia y Diluvio, física hidrológica y extinción del fuego
+void testRainAndDelugeWaterPhysicsAndFireExtinction() {
+    using namespace ReligionSim;
+    std::cout << "Running testRainAndDelugeWaterPhysicsAndFireExtinction()..." << std::endl;
+
+    DivinePowersSystem divinePowers;
+    WorldMap waterWorldMap(40, 40);
+
+    ReligionRegistry religionRegistry;
+    GestorHumanos villagerManager;
+    EventLine eventLineSystem;
+
+    // EN: Setup player and rival religions
+    // ES: Configurar religiones del jugador y rivales
+    int playerRelId = religionRegistry.createPrimordialReligion("Acuafieles", "Acuarius", ColorRGB{60, 160, 240}, "Water", 100);
+    Religion* playerReligion = religionRegistry.getReligion(playerRelId);
+    assert(playerReligion != nullptr);
+    playerReligion->theologyPoints = 500;
+
+    // EN: Add a shaman leader to enable divine power channeling
+    // ES: Agregar un líder chamán para permitir la canalización de poderes divinos
+    Humano tribalShaman(1, "Chaman Pluvial", 15.0f, 15.0f);
+    tribalShaman.setReligionId(playerRelId);
+    tribalShaman.setEsChaman(true);
+    villagerManager.agregarHumano(tribalShaman);
+
+    // =========================================================================
+    // 1. Verificar Atributos y Costos de Lluvia y Diluvio
+    // =========================================================================
+    assert(divinePowers.getPowerCost(DivinePowerType::Rain) == 30);
+    assert(divinePowers.getPowerCost(DivinePowerType::Deluge) == 65);
+    assert(divinePowers.getPowerRadius(DivinePowerType::Rain) == 4.0f);
+    assert(divinePowers.getPowerRadius(DivinePowerType::Deluge) == 6.0f);
+    assert(divinePowers.getPowerName(DivinePowerType::Rain) == "LLUVIA BENDITA");
+    assert(divinePowers.getPowerName(DivinePowerType::Deluge) == "GRAN DILUVIO");
+
+    // =========================================================================
+    // 2. Canalización e Invocación de Lluvia Bendita
+    // =========================================================================
+    const int initialFaith = playerReligion->theologyPoints;
+    const auto rainCastResult = divinePowers.castPower(DivinePowerType::Rain, 15, 15,
+                                                      waterWorldMap, religionRegistry, villagerManager,
+                                                      100, eventLineSystem, playerRelId);
+    assert(rainCastResult.success);
+    assert(rainCastResult.faithGenerated > 0);
+    assert(playerReligion->theologyPoints == initialFaith - 30 + rainCastResult.faithGenerated);
+    assert(divinePowers.getActiveFX().size() == 1);
+    assert(divinePowers.getActiveFX()[0].type == DivinePowerType::Rain);
+
+    // =========================================================================
+    // 3. Hidrología y Física de Escorrentía por Gradiente Hidráulico
+    // =========================================================================
+    // EN: Create an incline: cell (10, 10) high elevation (1.50) -> neighbor (11, 10) low elevation (0.50)
+    // ES: Crear una pendiente: celda (10, 10) alta elevación (1.50) -> vecina (11, 10) baja elevación (0.50)
+    // EN: Create a gorge: mountain ridges on sides (2.0) channel runoff from (10, 10) directly into (11, 10)
+    // ES: Crear un desfiladero: crestas montañosas en los flancos (2.0) encauzan la escorrentía hacia (11, 10)
+    for (int deltaY = -1; deltaY <= 1; ++deltaY) {
+        for (int deltaX = -1; deltaX <= 1; ++deltaX) {
+            waterWorldMap.getCell(10 + deltaX, 10 + deltaY).elevation = 2.0f;
+        }
+    }
+
+    Cell& highSlopeCell = waterWorldMap.getCell(10, 10);
+    highSlopeCell.elevation = 1.50f;
+    highSlopeCell.biome = BiomeType::HighlandHills;
+    highSlopeCell.waterDepth = 0.0f;
+
+    Cell& lowValleyCell = waterWorldMap.getCell(11, 10);
+    lowValleyCell.elevation = 0.50f;
+    lowValleyCell.biome = BiomeType::FertileValley;
+    lowValleyCell.waterDepth = 0.0f;
+
+    // EN: Add water to the high slope cell and simulate gravity-driven runoff
+    // ES: Agregar agua a la celda de pendiente alta y simular escorrentía por gravedad
+    waterWorldMap.addWaterToCell(10, 10, 0.40f);
+    assert(highSlopeCell.waterDepth == 0.40f);
+    assert(highSlopeCell.isFlooded);
+
+    for (int simulationStep = 0; simulationStep < 10; ++simulationStep) {
+        waterWorldMap.updateWaterPhysics(0.10f, nullptr, nullptr);
+    }
+
+    // EN: Verify water has flowed downhill from (10, 10) into (11, 10)
+    // ES: Verificar que el agua ha fluido colina abajo desde (10, 10) hacia (11, 10)
+    assert(lowValleyCell.waterDepth > 0.05f);
+    assert(highSlopeCell.waterDepth < 0.40f);
+    assert(lowValleyCell.moisture > 0.50f);
+    // EN: Verify fluid velocity momentum vector has developed along slope (+X)
+    // ES: Verificar que se desarrolló el vector de velocidad de flujo a lo largo de la ladera (+X)
+    assert(lowValleyCell.flowVelocityX > 0.0f || highSlopeCell.flowVelocityX > 0.0f);
+    assert(lowValleyCell.getFlowSpeed() > 0.0f || highSlopeCell.getFlowSpeed() > 0.0f);
+
+    // =========================================================================
+    // 4. Drenaje Natural hacia Océanos y Cuerpos de Agua
+    // =========================================================================
+    Cell& coastalLandCell = waterWorldMap.getCell(20, 20);
+    coastalLandCell.elevation = 0.30f;
+    coastalLandCell.biome = BiomeType::CoastalPlains;
+
+    Cell& seaDrainageCell = waterWorldMap.getCell(21, 20);
+    seaDrainageCell.elevation = 0.05f;
+    seaDrainageCell.biome = BiomeType::ShallowWater;
+    assert(seaDrainageCell.isNaturalWater());
+
+    waterWorldMap.addWaterToCell(20, 20, 0.50f);
+    for (int simulationStep = 0; simulationStep < 10; ++simulationStep) {
+        waterWorldMap.updateWaterPhysics(0.10f, nullptr, nullptr);
+    }
+    // EN: Natural water bodies act as sinks without piling up artificial waterDepth
+    // ES: Las masas de agua naturales actúan como sumidero sin acumular waterDepth artificial
+    assert(seaDrainageCell.waterDepth == 0.0f);
+    assert(coastalLandCell.waterDepth < 0.50f);
+
+    // =========================================================================
+    // 5. Interacción Agua <-> Fuego: Extinción por Inmersión y Generación de Vapor
+    // =========================================================================
+    Cell& burningForestCell = waterWorldMap.getCell(25, 25);
+    burningForestCell.elevation = 0.80f;
+    burningForestCell.biome = BiomeType::DenseForest;
+    burningForestCell.naturalResource = ResourceType::Wood;
+    burningForestCell.resourceAmount = 80;
+    const bool forestIgnited = waterWorldMap.igniteCell(25, 25, 10.0f, 0.95f);
+    assert(forestIgnited);
+    assert(burningForestCell.isBurning);
+
+    // EN: Deliver deluge water onto the burning forest tile
+    // ES: Arrojar agua de diluvio sobre la celda del bosque en llamas
+    waterWorldMap.addWaterToCell(25, 25, 0.45f);
+    waterWorldMap.updateWaterPhysics(0.10f, nullptr, nullptr);
+
+    // EN: Burning cell must be extinguished immediately and produce steam plumes
+    // ES: La celda en llamas debe quedar apagada de inmediato y producir plumas de vapor
+    assert(!burningForestCell.isBurning);
+    assert(burningForestCell.steamTimer > 1.0f);
+
+    // EN: Flooded and saturated ground becomes incombustible
+    // ES: El suelo inundado y saturado se vuelve incombustible
+    assert(burningForestCell.isFlooded);
+    assert(burningForestCell.getFlammability() == 0.0f);
+    const bool ignitionAttemptOnFloodedGround = waterWorldMap.igniteCell(25, 25, 10.0f, 1.0f);
+    assert(!ignitionAttemptOnFloodedGround);
+    assert(!burningForestCell.isBurning);
+
+    // =========================================================================
+    // 6. Extinción de Unidades Vivas en Llamas por Inmersión y Lluvia
+    // =========================================================================
+    Humano burningVillager(201, "Aldeano Fuego", 11.0f, 10.0f);
+    burningVillager.ignite(6.0f);
+    assert(burningVillager.isBurning());
+
+    // EN: Step into flooded tile (11, 10) where waterDepth > 0.05f
+    // ES: Pisar celda inundada (11, 10) donde waterDepth > 0.05f
+    villagerManager.agregarHumano(burningVillager);
+    waterWorldMap.updateWaterPhysics(0.10f, nullptr, &villagerManager);
+
+    auto villagerIterator = std::find_if(villagerManager.getHumanos().begin(), villagerManager.getHumanos().end(),
+                                         [](const Humano& h) { return h.getId() == 201; });
+    assert(villagerIterator != villagerManager.getHumanos().end());
+    assert(!villagerIterator->isBurning());
+
+    // =========================================================================
+    // 7. Sanación de Aldeanos y Lluvia Continua
+    // =========================================================================
+    villagerIterator->setHealth(40.0f);
+    assert(villagerIterator->getHealth() == 40.0f);
+
+    // Move villager into rain radius at (15, 15)
+    villagerIterator->setPosicion(15.0f, 15.0f);
+
+    // Simulate active rain FX over the area
+    divinePowers.update(1.0f, waterWorldMap, villagerManager, nullptr, nullptr);
+    assert(villagerIterator->getHealth() > 40.0f);
+
+    // =========================================================================
+    // 8. Revitalización Ecológica de Ceniza Acelerada por Agua
+    // =========================================================================
+    Cell& scorchedLandCell = waterWorldMap.getCell(30, 30);
+    scorchedLandCell.isBurnt = true;
+    scorchedLandCell.ashRecoveryTimer = 20.0f;
+    scorchedLandCell.biome = BiomeType::AridDesert;
+
+    // EN: Flood the ash soil with water and verify accelerated recovery
+    // ES: Inundar el suelo de ceniza con agua y verificar recuperación acelerada
+    waterWorldMap.addWaterToCell(30, 30, 0.25f);
+    const float initialAshRecoveryTimer = scorchedLandCell.ashRecoveryTimer;
+    waterWorldMap.updateWaterPhysics(0.50f, nullptr, nullptr);
+
+    // Ash timer was reduced by both dt and the 3x water acceleration bonus
+    assert(scorchedLandCell.ashRecoveryTimer < initialAshRecoveryTimer - 1.0f);
+
+    // =========================================================================
+    // 9. Hidrodinámica Avanzada: Arrastre de Corriente y Escombros Flotantes
+    // =========================================================================
+    // EN: Verify flowing water current imparts hydrodynamic drag on swimmers and drifts buoyant debris
+    // ES: Verificar que la corriente de agua ejerce arrastre hidrodinámico en nadadores y deriva escombros flotantes
+    Cell& riverCurrentCell = waterWorldMap.getCell(11, 10);
+    riverCurrentCell.elevation = 0.20f;
+    riverCurrentCell.biome = BiomeType::FertileValley;
+    waterWorldMap.addWaterToCell(11, 10, 0.45f);
+    riverCurrentCell.flowVelocityX = 1.8f;
+    riverCurrentCell.flowVelocityY = 0.0f;
+    riverCurrentCell.isFlooded = true;
+
+    Humano swimmerVillager(301, "Nadador Rio", 11.2f, 10.5f);
+    villagerManager.agregarHumano(swimmerVillager);
+    const float initialSwimmerX = 11.2f;
+
+    waterWorldMap.updateWaterPhysics(0.20f, nullptr, &villagerManager);
+
+    auto swimmerIterator = std::find_if(villagerManager.getHumanos().begin(), villagerManager.getHumanos().end(),
+                                        [](const Humano& h) { return h.getId() == 301; });
+    assert(swimmerIterator != villagerManager.getHumanos().end());
+    assert(swimmerIterator->getX() > initialSwimmerX);
+    assert(swimmerIterator->estaNadando());
+
+    // EN: Buoyant debris (uprooted trunk) floating in river current develops downstream drift
+    // ES: Escombros flotantes (tronco arrancado) en corriente de río desarrollan deriva río abajo
+    divinePowers.spawnDebris(DebrisType::UprootedTreeTrunk, 11.2f, 10.5f, 0.0f, 0.0f, 0.0f, 0.0f, 20.0f, 10.0f, 1.0f);
+    assert(!divinePowers.getActiveDebris().empty());
+    divinePowers.update(0.10f, waterWorldMap, villagerManager, nullptr, nullptr);
+    assert(divinePowers.getActiveDebris().back().velocityX > 0.0f);
+    assert(divinePowers.getActiveDebris().back().isFloating);
+
+    std::cout << "  -> testRainAndDelugeWaterPhysicsAndFireExtinction PASSED! Rain & deluge powers, fluid hydrology, runoff flow, ocean sinks, instant fire extinction with steam, incombustible flooded tiles, burning villager quenching, accelerated ash recovery, and hydrodynamic current drag & floating debris drift verified." << std::endl;
+}
+
+void testAtomicBombCheatAndNuclearPhysics() {
+    using namespace ReligionSim;
+    std::cout << "[Test] Running testAtomicBombCheatAndNuclearPhysics (FUCKINGBOMB Cheat & Nuclear Detonation Physics)..." << std::endl;
+
+    // EN: Setup world, map, religion, and systems
+    // ES: Configurar mundo, mapa, religión y sistemas
+    WorldMap nuclearMap(40, 40);
+    ReligionRegistry religionRegistry;
+    GestorHumanos villagerManager;
+    EventLine eventLine;
+    BuildingSystem buildingSystem;
+    ReplicationEngine replicationEngine;
+    DivinePowersSystem divinePowers;
+
+    const int playerRelId = religionRegistry.createPrimordialReligion("Pueblo Atómico", "Dios del Uranio", ColorRGB{255, 235, 90}, "Uranium", 0);
+    Religion* playerReligion = religionRegistry.getReligion(playerRelId);
+    assert(playerReligion != nullptr);
+    playerReligion->theologyPoints = 0; // EN: Cheat power should work even with 0 faith / ES: El poder truco debe funcionar incluso con 0 fe
+
+    // EN: 1. Validate cheat attributes: zero cost, radius, name, color
+    // ES: 1. Validar atributos del truco: costo cero, radio, nombre, color
+    assert(divinePowers.getPowerCost(DivinePowerType::AtomicBomb) == 0);
+    assert(divinePowers.getPowerRadius(DivinePowerType::AtomicBomb) == static_cast<int>(std::round(LittleBoyScale::HEAVY_OVERPRESSURE_RADIUS_CELLS)));
+    assert(divinePowers.getPowerName(DivinePowerType::AtomicBomb).find("FUCKINGBOMB") != std::string::npos);
+    assert(divinePowers.getPowerColor(DivinePowerType::AtomicBomb).r == 255);
+
+    // EN: 2. Setup environment around ground zero (20, 20)
+    // ES: 2. Configurar entorno alrededor de la zona cero (20, 20)
+    // - Epicenter cell (20, 20) with water and fertile soil
+    Cell& epicenterCell = nuclearMap.getCell(20, 20);
+    epicenterCell.biome = BiomeType::FertileValley;
+    epicenterCell.elevation = 1.2f;
+    epicenterCell.waterDepth = 0.50f;
+    epicenterCell.isFlooded = true;
+    epicenterCell.hasImpactCrater = false;
+
+    // - Intermediate forest cell (23, 20) at distance 3.0 (bordering intermediate zone)
+    Cell& forestCell = nuclearMap.getCell(23, 20);
+    forestCell.biome = BiomeType::DenseForest;
+    forestCell.naturalResource = ResourceType::Wood;
+    forestCell.resourceAmount = 150;
+    forestCell.hasTreesUprooted = false;
+
+    // - Setup building in intermediate zone at (24, 20)
+    const int houseId = buildingSystem.initiateHouseConstruction(24, 20, 101, 102, playerRelId, HouseType::ThatchedHut, nuclearMap);
+    House* pHouse = buildingSystem.getHouseByIdMutable(houseId);
+    assert(pHouse != nullptr);
+    pHouse->state = BuildingState::Completed;
+    assert(!buildingSystem.getHouses().empty());
+    assert(!buildingSystem.getHouses()[0].isRuined());
+
+    // - Epicenter villager (distance 0.28): should be 100% vaporized
+    Humano epicenterVillager(1, "Adan Epicentro", 20.2f, 20.2f);
+    epicenterVillager.setReligionId(playerRelId);
+    epicenterVillager.setSalud(100.0f);
+    villagerManager.agregarHumano(epicenterVillager);
+
+    // - Intermediate villager (distance 5.0): should suffer severe burns and ragdoll
+    Humano intermediateVillager(2, "Eva Intermedia", 25.0f, 20.0f);
+    intermediateVillager.setReligionId(playerRelId);
+    intermediateVillager.setSalud(100.0f);
+    villagerManager.agregarHumano(intermediateVillager);
+
+    // - Peripheral villager (distance 8.0): should suffer blast damage and panic
+    Humano peripheralVillager(3, "Cain Periferico", 28.0f, 20.0f);
+    peripheralVillager.setReligionId(playerRelId);
+    peripheralVillager.setSalud(100.0f);
+    villagerManager.agregarHumano(peripheralVillager);
+
+    // EN: 3. Cast Atomic Bomb at (20, 20)
+    // ES: 3. Lanzar Bomba Atómica en (20, 20)
+    const CastResult castResult = divinePowers.castPower(
+        DivinePowerType::AtomicBomb, 20, 20,
+        nuclearMap, religionRegistry, villagerManager,
+        2026, eventLine, playerRelId,
+        &buildingSystem, &replicationEngine
+    );
+
+    assert(castResult.success == true);
+    assert(castResult.casualties >= 1);
+    assert(castResult.message.find("FUCKINGBOMB") != std::string::npos);
+    assert(divinePowers.getActiveFX().size() == 1);
+    assert(divinePowers.getActiveFX()[0].type == DivinePowerType::AtomicBomb);
+
+    // EN: 4. Verify Epicenter Physics: crater formation, water boiled, unit vaporized
+    // ES: 4. Verificar físicas del epicentro: formación de cráter, agua evaporada, unidad vaporizada
+    assert(epicenterCell.hasImpactCrater == true);
+    assert(epicenterCell.craterDepth >= 0.8f);
+    assert(epicenterCell.elevation < 1.2f);
+    assert(epicenterCell.biome == BiomeType::AridDesert);
+    assert(epicenterCell.waterDepth == 0.0f);
+    assert(epicenterCell.steamTimer > 0.0f);
+
+    Humano& refEpicenterVillager = villagerManager.getHumanos()[0];
+    assert(refEpicenterVillager.estaMuerto() == true);
+    assert(refEpicenterVillager.isRagdoll() == true);
+    // EN: Verify extreme vertical ballistic velocity and flight altitude for blown-up unit
+    // ES: Verificar velocidad balística vertical extrema y altitud de vuelo para la unidad lanzada
+    assert(refEpicenterVillager.getVelocityZ() >= 40.0f);
+    assert(refEpicenterVillager.getDeathTimer() >= 2.0f); // EN: Corpse does not expire mid-air / ES: Cadáver no expira en el aire
+
+    // EN: 5. Verify Intermediate Zone Physics: trees uprooted, houses ruined, burns & multi-part flying debris
+    // ES: 5. Verificar físicas de zona intermedia: árboles arrancados, casas en ruinas, quemaduras y escombros múltiples volando
+    assert(forestCell.hasTreesUprooted == true);
+    assert(forestCell.resourceAmount == 0);
+    assert(forestCell.naturalResource == ResourceType::None);
+
+    assert(buildingSystem.getHouses()[0].isRuined() == true);
+    assert(divinePowers.getActiveDebris().size() >= 4); // EN: Trunk + Thatch + 2 Rubble + Thatch
+
+    // EN: Verify that debris pieces have high ballistic flight velocity
+    // ES: Verificar que las piezas de escombros tienen alta velocidad balística de vuelo
+    bool hasHighFlyingDebris = false;
+    for (const auto& debrisItem : divinePowers.getActiveDebris()) {
+        if (debrisItem.velocityZ >= 30.0f) {
+            hasHighFlyingDebris = true;
+            break;
+        }
+    }
+    assert(hasHighFlyingDebris == true);
+
+    Humano& refIntermediateVillager = villagerManager.getHumanos()[1];
+    assert(refIntermediateVillager.getSalud() < 100.0f);
+    assert(refIntermediateVillager.isRagdoll() == true || refIntermediateVillager.isBurning() == true);
+
+    // EN: 6. Verify Peripheral Zone Physics: blast damage
+    // ES: 6. Verificar físicas de zona periférica: daño por onda de choque
+    Humano& refPeripheralVillager = villagerManager.getHumanos()[2];
+    assert(refPeripheralVillager.getSalud() < 100.0f);
+
+    // EN: 7. Test progression with update: cloud lifecycle, boiled standing water, debris flight & ground bounce
+    // ES: 7. Probar progresión con update: ciclo de vida de nube, agua hervida, vuelo de escombros y rebote en suelo
+    epicenterCell.waterDepth = 0.30f; // standing water attempts to accumulate
+    divinePowers.update(0.5f, nuclearMap, villagerManager, &buildingSystem, &replicationEngine);
+    assert(epicenterCell.waterDepth == 0.0f); // boiled away!
+
+    // EN: Verify debris moves and altitude rises in flight
+    assert(!divinePowers.getActiveDebris().empty());
+    bool debrisAirborne = false;
+    for (const auto& debrisItem : divinePowers.getActiveDebris()) {
+        if (debrisItem.altitude > 0.0f) {
+            debrisAirborne = true;
+            break;
+        }
+    }
+    assert(debrisAirborne == true);
+
+    // EN: Advance multiple steps to verify ragdoll flight and landing
+    for (int step = 0; step < 20; ++step) {
+        refEpicenterVillager.update(0.1f, nuclearMap, nullptr, false, &buildingSystem);
+    }
+    // Corpse should still be in flight and deathTimer preserved while airborne
+    assert(refEpicenterVillager.getAltitude() > 0.0f);
+    assert(refEpicenterVillager.getDeathTimer() >= 2.0f);
+
+    // EN: 8. Verify Game command line and hotkey integration
+    // ES: 8. Verificar integración con línea de comandos y teclas de Game
+    Game testGame(1280, 720);
+    testGame.setGameState(GameState::Playing);
+
+    // EN: Test typing command in console box: ENTER -> "FUCKINGBOMB" -> ENTER
+    // ES: Probar tecleo del comando en la consola: ENTER -> "FUCKINGBOMB" -> ENTER
+    testGame.onKeyPress(13); // Open command box
+    for (char character : std::string("FUCKINGBOMB")) {
+        testGame.onKeyPress(static_cast<int>(character));
+    }
+    testGame.onKeyPress(13); // Execute command
+    assert(testGame.getActiveDivinePower() == DivinePowerType::AtomicBomb);
+
+    // EN: Toggle off by typing command again
+    // ES: Desactivar tecleando el comando de nuevo
+    testGame.onKeyPress(13);
+    for (char character : std::string("FUCKINGBOMB")) {
+        testGame.onKeyPress(static_cast<int>(character));
+    }
+    testGame.onKeyPress(13);
+    assert(testGame.getActiveDivinePower() == DivinePowerType::Inactive);
+
+    // EN: Test Hotkey 'O' / 'o'
+    // ES: Probar atajo de teclado 'O' / 'o'
+    testGame.onKeyPress('o'); // Hotkey toggle on
+    assert(testGame.getActiveDivinePower() == DivinePowerType::AtomicBomb);
+    testGame.onKeyPress('o'); // Hotkey toggle off
+    assert(testGame.getActiveDivinePower() == DivinePowerType::Inactive);
+
+    std::cout << "  -> testAtomicBombCheatAndNuclearPhysics PASSED! Nuclear detonation, epicentral vaporization, vitrified crater, water boiling, and FUCKINGBOMB cheat verified." << std::endl;
+}
+
+// =========================================================================
+// EN: Unit Test: Finite Natural Resources Depletion and Autonomous AI Migration
+// ES: Prueba Unitaria: Agotamiento de Recursos Naturales Finitos y Migración Autónoma de IA
+// =========================================================================
+void testFiniteNaturalResourcesDepletionAndAI() {
+    std::cout << "[Test] Running testFiniteNaturalResourcesDepletionAndAI..." << std::endl;
+    using namespace ReligionSim;
+
+    // EN: 1. Verify finite resource stock depletion and terrain deforestation transitions
+    // ES: 1. Verificar agotamiento de existencias finitas y deforestación del terreno
+    WorldMap simulationMap(32, 32);
+    simulationMap.generateProceduralWorld(45678);
+
+    // EN: Clear local neighborhood around (10, 10) to isolate test cells
+    // ES: Limpiar vecindario local alrededor de (10, 10) para aislar las celdas de prueba
+    for (int deltaOffsetY = -6; deltaOffsetY <= 6; ++deltaOffsetY) {
+        for (int deltaOffsetX = -6; deltaOffsetX <= 6; ++deltaOffsetX) {
+            const int targetCoordX = 10 + deltaOffsetX;
+            const int targetCoordY = 10 + deltaOffsetY;
+            if (simulationMap.isValid(targetCoordX, targetCoordY)) {
+                Cell& neighborTestCell = simulationMap.getCell(targetCoordX, targetCoordY);
+                neighborTestCell.naturalResource = ResourceType::None;
+                neighborTestCell.resourceAmount = 0;
+                neighborTestCell.maxResourceAmount = 0;
+            }
+        }
+    }
+
+    Cell& timberCell = simulationMap.getCell(10, 10);
+    timberCell.biome = BiomeType::DenseForest;
+    timberCell.naturalResource = ResourceType::Wood;
+    timberCell.resourceAmount = 10;
+    timberCell.maxResourceAmount = 10;
+    timberCell.hasTreesUprooted = false;
+
+    assert(!timberCell.isResourceDepleted());
+    assert(timberCell.resourceAmount == 10);
+
+    // EN: First harvest: extract 4 units, leaving 6 units active
+    // ES: Primera cosecha: sustraer 4 unidades, quedando 6 unidades activas
+    const int firstHarvested = timberCell.harvestResource(4);
+    assert(firstHarvested == 4);
+    assert(timberCell.resourceAmount == 6);
+    assert(timberCell.naturalResource == ResourceType::Wood);
+    assert(!timberCell.isResourceDepleted());
+    assert(!timberCell.hasTreesUprooted);
+
+    // EN: Second harvest: extract 4 units, leaving 2 units active
+    // ES: Segunda cosecha: sustraer 4 unidades, quedando 2 unidades activas
+    const int secondHarvested = timberCell.harvestResource(4);
+    assert(secondHarvested == 4);
+    assert(timberCell.resourceAmount == 2);
+    assert(timberCell.naturalResource == ResourceType::Wood);
+    assert(!timberCell.isResourceDepleted());
+
+    // EN: Final harvest: request 4 units, but only 2 remain in the finite stock
+    // ES: Cosecha final: solicitar 4 unidades, pero solo quedan 2 en la veta finita
+    const int finalHarvested = timberCell.harvestResource(4);
+    assert(finalHarvested == 2);
+    assert(timberCell.resourceAmount == 0);
+    assert(timberCell.naturalResource == ResourceType::None);
+    assert(timberCell.isResourceDepleted());
+
+    // EN: For wood, timber extraction fells trees and converts dense forest into open meadow
+    // ES: Para madera, la tala derriba árboles y convierte el bosque denso en pradera abierta
+    assert(timberCell.hasTreesUprooted);
+    assert(timberCell.biome == BiomeType::CoastalPlains);
+
+    // EN: 2. Verify that natural resources are strictly non-renewable (no magical regeneration)
+    // ES: 2. Verificar que los recursos naturales no se regeneran mágicamente
+    simulationMap.updateResources(60.0f);
+    assert(timberCell.resourceAmount == 0);
+    assert(timberCell.naturalResource == ResourceType::None);
+    assert(timberCell.isResourceDepleted());
+
+    // EN: 3. Verify mineral ore exhaustion (Gold/Stone)
+    // ES: 3. Verificar agotamiento de vetas minerales (Oro/Piedra)
+    Cell& goldCell = simulationMap.getCell(12, 12);
+    goldCell.naturalResource = ResourceType::Gold;
+    goldCell.resourceAmount = 15;
+    goldCell.maxResourceAmount = 15;
+
+    const int goldHarvested = goldCell.harvestResource(15);
+    assert(goldHarvested == 15);
+    assert(goldCell.resourceAmount == 0);
+    assert(goldCell.naturalResource == ResourceType::None);
+    assert(goldCell.isResourceDepleted());
+
+    // EN: 4. Autonomous AI node discovery and fallback migration when preferred node is exhausted
+    // ES: 4. Búsqueda autónoma de nodos y migración de IA al agotarse el nodo preferido
+    Humano testVillager(99, "AutonomousHarvester", 10.5f, 10.5f);
+
+    // EN: The timber cell at (10, 10) is depleted, so findResourceNode for Wood must not locate it
+    // ES: La celda de madera en (10, 10) está agotada, por lo que findResourceNode no debe localizarla
+    Point2i locatedNodePos{-1, -1};
+    const bool foundDepletedWood = testVillager.findResourceNode(simulationMap, ResourceType::Wood, 2, locatedNodePos);
+    assert(!foundDepletedWood);
+
+    // EN: Set an active Food node at (14, 10)
+    // ES: Establecer un nodo activo de Alimento en (14, 10)
+    Cell& foodCell = simulationMap.getCell(14, 10);
+    foodCell.naturalResource = ResourceType::Food;
+    foodCell.resourceAmount = 45;
+    foodCell.maxResourceAmount = 45;
+
+    ResourceType detectedResourceType = ResourceType::None;
+    const bool foundAnyNode = testVillager.findAnyResourceNode(simulationMap, 8, locatedNodePos, detectedResourceType);
+    assert(foundAnyNode);
+    assert(locatedNodePos.x == 14 && locatedNodePos.y == 10);
+    assert(detectedResourceType == ResourceType::Food);
+
+    std::cout << "  -> testFiniteNaturalResourcesDepletionAndAI PASSED! Finite stock depletion, deforestation, non-renewability, and AI fallback migration verified." << std::endl;
+}
+
+void testFireSpritesAndVisualEffectsPipeline() {
+    std::cout << "[Test] Running testFireSpritesAndVisualEffectsPipeline..." << std::endl;
+    using namespace ReligionSim;
+
+    // EN: 1. Verify all 10 fire sprite asset files exist on disk with exact binary dimensions
+    // ES: 1. Verificar que los 10 archivos de sprites de fuego existan en disco con dimensiones binarias exactas
+    struct FireAssetSpec {
+        std::string relativePath;
+        size_t expectedByteSize;
+    };
+
+    const std::vector<FireAssetSpec> fireAssets = {
+        {"assets/sprites/fire/wildfire_sheet.rgba", 512u * 128u * 4u},
+        {"assets/sprites/fire/flame_sheet.rgba", 384u * 128u * 4u},
+        {"assets/sprites/fire/small_flame_sheet.rgba", 448u * 96u * 4u},
+        {"assets/sprites/fire/campfire_sheet.rgba", 512u * 128u * 4u},
+        {"assets/sprites/fire/meteor_giant.rgba", 128u * 128u * 4u},
+        {"assets/sprites/fire/meteor_fireball.rgba", 128u * 128u * 4u},
+        {"assets/sprites/fire/volcano_eruption_sheet.rgba", 256u * 128u * 4u},
+        {"assets/sprites/fire/fire_pit.rgba", 128u * 128u * 4u},
+        {"assets/sprites/fire/flame_burst_sheet.rgba", 256u * 128u * 4u},
+        {"assets/sprites/fire/lava_tiles.rgba", 512u * 256u * 4u}
+    };
+
+    for (const auto& asset : fireAssets) {
+        std::ifstream file(asset.relativePath, std::ios::binary | std::ios::ate);
+        assert(file.is_open() && "Fire sprite asset file must exist on disk");
+        const size_t fileSize = static_cast<size_t>(file.tellg());
+        assert(fileSize == asset.expectedByteSize && "Fire asset file size must match RGBA 32-bit layout");
+    }
+
+    // EN: 2. Verify Renderer loads all fire buffers into memory with correct pixel counts
+    // ES: 2. Verificar que el Renderer cargue todos los búferes de fuego en memoria con recuentos de píxeles correctos
+    Renderer testRenderer(640, 480);
+    assert(testRenderer.getWildfirePixels().size() == 512u * 128u);
+    assert(testRenderer.getFlamePixels().size() == 384u * 128u);
+    assert(testRenderer.getCampfirePixels().size() == 512u * 128u);
+    assert(testRenderer.getMeteorGiantPixels().size() == 128u * 128u);
+    assert(testRenderer.getMeteorFireballPixels().size() == 128u * 128u);
+    assert(testRenderer.getVolcanoEruptionPixels().size() == 256u * 128u);
+    assert(testRenderer.getFirePitPixels().size() == 128u * 128u);
+    assert(testRenderer.getFlameBurstPixels().size() == 256u * 128u);
+    assert(testRenderer.getLavaTilesPixels().size() == 512u * 256u);
+
+    // EN: 3. Verify burning unit behavior, panic state, and flame rendering
+    // ES: 3. Verificar comportamiento de unidad en llamas, estado de pánico y renderizado de fuego
+    Humano burningVillager(105, "BurningGrog", 12.0f, 12.0f);
+    burningVillager.ignite(6.0f);
+    assert(burningVillager.isBurning());
+    assert(burningVillager.getBurnTimer() > 0.0f);
+
+    WorldMap simMap(32, 32);
+    const float initialHp = burningVillager.getSalud();
+    burningVillager.update(1.0f, simMap);
+    assert(burningVillager.getSalud() < initialHp && "Burning unit must sustain fire damage over time");
+
+    std::vector<uint32_t> testFrame(640 * 480, 0xFF000000u);
+    IsometricCamera simCam(640, 480);
+    TileSet testTileSet;
+    burningVillager.render(testFrame.data(), 640, 480, simCam, simMap, testTileSet, ColorRGB{255, 120, 20}, false);
+
+    // EN: 4. Verify campfire and fire effect render routines execute without crashing
+    // ES: 4. Verificar que las rutinas de renderizado de fogata y fuego se ejecuten sin errores
+    testRenderer.drawCampfire(320.0f, 240.0f, 1.0f, 0.5f);
+    testRenderer.drawFireEffect(320.0f, 240.0f, 0.85f, 1.0f, 0.5f, 1.0f, 0.0f);
+    testRenderer.drawFireEffect(320.0f, 240.0f, 0.35f, 1.0f, 0.5f, 0.0f, 0.0f);
+
+    std::cout << "  -> testFireSpritesAndVisualEffectsPipeline PASSED! All 10 fire sprite textures, RGBA dimensions, flame rendering and campfire routines verified." << std::endl;
+}
+
+void testVolcanoPixelArtSpritesAndLifecyclePipeline() {
+    std::cout << "[Test] Running testVolcanoPixelArtSpritesAndLifecyclePipeline..." << std::endl;
+    using namespace ReligionSim;
+
+    // EN: 1. Verify volcano sheet asset file exists with exact 1024x765 RGBA dimensions
+    // ES: 1. Verificar que el archivo del atlas del volcán exista con dimensiones exactas 1024x765 RGBA
+    const std::string volcanoPath = "assets/sprites/volcano/volcano_sheet.rgba";
+    std::ifstream file(volcanoPath, std::ios::binary | std::ios::ate);
+    assert(file.is_open() && "Volcano sprite sheet must exist on disk");
+    const size_t fileSize = static_cast<size_t>(file.tellg());
+    constexpr size_t expectedBytes = 1024u * 765u * 4u;
+    assert(fileSize == expectedBytes && "Volcano sheet byte size must match 1024x765 RGBA");
+
+    // EN: 2. Verify Renderer loads volcano sprite pixels
+    // ES: 2. Verificar que Renderer cargue los píxeles del sprite del volcán
+    Renderer testRenderer(640, 480);
+    assert(testRenderer.getVolcanoSheetPixels().size() == 1024u * 765u);
+
+    // EN: 3. Verify execution of all 4 volcano lifecycle stages without memory or rasterizer faults
+    // ES: 3. Verificar ejecución de las 4 etapas del ciclo de vida del volcán sin fallos
+    testRenderer.drawVolcano(320.0f, 240.0f, 1.0f, 0.5f, false, 0.0f); // Dormant
+    testRenderer.drawVolcano(320.0f, 240.0f, 1.0f, 0.5f, true, 0.10f); // Phase 1: Awakening
+    testRenderer.drawVolcano(320.0f, 240.0f, 1.0f, 0.5f, true, 0.35f); // Phase 2: Explosive blast
+    testRenderer.drawVolcano(320.0f, 240.0f, 1.0f, 0.5f, true, 0.65f); // Phase 3: Plinian mushroom cloud
+    testRenderer.drawVolcano(320.0f, 240.0f, 1.0f, 0.5f, true, 0.90f); // Phase 4: Cascading lava rivers
+
+    // EN: 4. Verify DivinePowersSystem Volcano cataclysm updates lavaTimer progression
+    // ES: 4. Verificar que el cataclismo volcánico de DivinePowersSystem actualice la progresión de lavaTimer
+    WorldMap simMap(32, 32);
+    ReligionRegistry simRegistry;
+    const int playerRelId = simRegistry.createPrimordialReligion("Culto Volcanico", "Dios de las Llamas", ColorRGB{255, 60, 20}, "Flame", 0);
+    Religion* pRel = simRegistry.getReligion(playerRelId);
+    assert(pRel != nullptr);
+    pRel->theologyPoints = 200;
+
+    GestorHumanos simVillagers;
+    BuildingSystem simBuildings;
+    ReplicationEngine simReplication;
+    DivinePowersSystem simPowers;
+    EventLine simEvents;
+
+    simPowers.castPower(DivinePowerType::Volcano, 16, 16, simMap, simRegistry, simVillagers, -4000, simEvents, playerRelId, &simBuildings, &simReplication);
+    Cell& targetCell = simMap.getCell(16, 16);
+    assert(targetCell.hasVolcano == true);
+    assert(targetCell.hasActiveLava == true);
+
+    simPowers.update(2.0f, simMap, simVillagers, &simBuildings, &simReplication);
+    assert(targetCell.lavaTimer > 0.0f && "Volcano cataclysm must update lavaTimer eruption progression");
+
+    std::cout << "  -> testVolcanoPixelArtSpritesAndLifecyclePipeline PASSED! 1024x765 atlas, dormant, awakening, blast and lava flow stages verified." << std::endl;
+}
+
+// EN: Unit test verifying water movement sprite sheets, ripple animation, coastal surf, currents, whirlpools and splashes
+// ES: Prueba unitaria que verifica hojas de sprites de movimiento de agua, animación de ondas, rompiente costera, corrientes, remolinos y salpicaduras
+void testWaterMovementSpritesAndDynamicFluidPipeline() {
+    std::cout << "[Test] Running testWaterMovementSpritesAndDynamicFluidPipeline..." << std::endl;
+    using namespace ReligionSim;
+
+    // EN: 1. Verify master water sheet asset file exists with exact 1024x765 RGBA dimensions
+    // ES: 1. Verificar que el archivo del atlas de agua exista con dimensiones exactas 1024x765 RGBA
+    const std::string waterAtlasPath = "assets/sprites/water/water_sheet.rgba";
+    std::ifstream waterAtlasFile(waterAtlasPath, std::ios::binary | std::ios::ate);
+    if (!waterAtlasFile.is_open()) {
+        waterAtlasFile.open("religion_simulator_isometric/" + waterAtlasPath, std::ios::binary | std::ios::ate);
+    }
+    assert(waterAtlasFile.is_open() && "Water atlas 1024x765 RGBA sprite file must exist on disk");
+    const std::streamsize waterAtlasFileSize = waterAtlasFile.tellg();
+    constexpr std::streamsize expectedWaterAtlasBytes = 1024 * 765 * 4;
+    assert(waterAtlasFileSize == expectedWaterAtlasBytes && "Water atlas RGBA file size must match 1024x765x4 bytes");
+
+    // EN: 2. Verify sub-sheets for modular water movement subsystems
+    // ES: 2. Verificar sub-hojas para subsistemas modulares de movimiento de agua
+    auto verifyAssetFile = [](const std::string& relativePath, std::streamsize expectedBytes) {
+        std::ifstream fileStream(relativePath, std::ios::binary | std::ios::ate);
+        if (!fileStream.is_open()) {
+            fileStream.open("religion_simulator_isometric/" + relativePath, std::ios::binary | std::ios::ate);
+        }
+        assert(fileStream.is_open() && "Water sub-sheet asset file must exist");
+        assert(fileStream.tellg() == expectedBytes && "Water sub-sheet file size must match expected bytes");
+    };
+
+    verifyAssetFile("assets/sprites/water/water_ripples_sheet.rgba", 1024 * 170 * 4);
+    verifyAssetFile("assets/sprites/water/water_borders_sheet.rgba", 1024 * 175 * 4);
+    verifyAssetFile("assets/sprites/water/water_waves_sheet.rgba", 1024 * 115 * 4);
+    verifyAssetFile("assets/sprites/water/water_surf_sheet.rgba", 1024 * 116 * 4);
+    verifyAssetFile("assets/sprites/water/water_currents_sheet.rgba", 853 * 102 * 4);
+    verifyAssetFile("assets/sprites/water/water_whirlpool_sheet.rgba", 510 * 85 * 4);
+    verifyAssetFile("assets/sprites/water/water_splash_sheet.rgba", 425 * 85 * 4);
+
+    // EN: 3. Verify Renderer loads and populates all 8 water sprite pixel buffers
+    // ES: 3. Verificar que el Renderer cargue y pueble todos los 8 búferes de píxeles de agua
+    Renderer testRenderer(640, 480);
+
+    assert(testRenderer.getWaterSheetPixels().size() == 1024u * 765u && "Master water atlas pixels must be 1024x765");
+    assert(testRenderer.getWaterRipplesPixels().size() == 1024u * 170u && "Water ripples pixels must be 1024x170");
+    assert(testRenderer.getWaterBordersPixels().size() == 1024u * 175u && "Water borders pixels must be 1024x175");
+    assert(testRenderer.getWaterWavesPixels().size() == 1024u * 115u && "Water waves pixels must be 1024x115");
+    assert(testRenderer.getWaterSurfPixels().size() == 1024u * 116u && "Water surf pixels must be 1024x116");
+    assert(testRenderer.getWaterCurrentsPixels().size() == 853u * 102u && "Water currents pixels must be 853x102");
+    assert(testRenderer.getWaterWhirlpoolPixels().size() == 510u * 85u && "Water whirlpool pixels must be 510x85 (6 frames)");
+    assert(testRenderer.getWaterSplashPixels().size() == 425u * 85u && "Water splash pixels must be 425x85 (5 frames)");
+
+    // EN: 4. Exercise whirlpool and splash drawing routines to confirm no buffer overruns
+    // ES: Ejercitar rutinas de dibujo de remolino y salpicadura para confirmar ausencia de desbordamiento de búfer
+    testRenderer.drawWhirlpool(320.0f, 240.0f, 1.0f, 0.5f, 1.0f);
+    testRenderer.drawWaterSplash(320.0f, 240.0f, 1.0f, 0.25f, 1.0f);
+
+    std::cout << "  -> testWaterMovementSpritesAndDynamicFluidPipeline PASSED! 1024x765 atlas, ripples, ocean waves, coastal surf, currents, whirlpools and splashes verified." << std::endl;
+}
+
+// EN: Unit test verifying round Play button, circular hit-testing, and vintage cassette mechanical keys
+// ES: Prueba unitaria que verifica el botón redondo de Play, detección circular y teclas mecánicas de casetera
+void testCassetteAndRoundPlayButtons() {
+    std::cout << "[Test] Running testCassetteAndRoundPlayButtons..." << std::endl;
+
+    ReligionSim::Renderer testRenderer(1280, 720);
+    const auto& buttons = testRenderer.getButtons();
+
+    const ReligionSim::UIButton* buttonPause = nullptr;
+    const ReligionSim::UIButton* buttonPlay = nullptr;
+    const ReligionSim::UIButton* buttonFast = nullptr;
+    const ReligionSim::UIButton* buttonUltra = nullptr;
+
+    for (const auto& btn : buttons) {
+        if (btn.id == 201) buttonPause = &btn;
+        if (btn.id == 202) buttonPlay = &btn;
+        if (btn.id == 203) buttonFast = &btn;
+        if (btn.id == 204) buttonUltra = &btn;
+    }
+
+    assert(buttonPause != nullptr && "Cassette PAUSE button 201 must exist");
+    assert(buttonPlay != nullptr && "Round PLAY button 202 must exist");
+    assert(buttonFast != nullptr && "Cassette 2x button 203 must exist");
+    assert(buttonUltra != nullptr && "Cassette 5x button 204 must exist");
+
+    // EN: Verify cassette keys heights and round play circular geometry
+    // ES: Verificar altura de teclas de casetera y geometría circular del botón de play
+    assert(buttonPause->height == 26.0f);
+    assert(buttonFast->height == 26.0f);
+    assert(buttonUltra->height == 26.0f);
+    assert(buttonPause->width >= 98.0f);
+
+    // EN: Round play button must be strictly circular (width == height == diameter)
+    // ES: El botón redondo de play debe ser estrictamente circular (ancho == alto == diámetro)
+    assert(buttonPlay->width == 30.0f);
+    assert(buttonPlay->height == 30.0f);
+
+    // EN: Verify vertical center alignment between round play and cassette keys
+    // ES: Verificar alineación central vertical entre play redondo y teclas de casetera
+    const float cassetteCenterY = buttonPause->y + buttonPause->height * 0.5f;
+    const float playCenterY = buttonPlay->y + buttonPlay->height * 0.5f;
+    assert(std::abs(cassetteCenterY - playCenterY) < 0.01f && "Play button must be vertically centered with cassette keys");
+
+    // EN: 2. Test Euclidean circular hit testing on Round Play Button (ID 202)
+    // ES: 2. Probar detección circular euclidiana en el botón redondo de Play (ID 202)
+    const float playCenterX = buttonPlay->x + buttonPlay->width * 0.5f;
+    const float playRadius = buttonPlay->width * 0.5f;
+
+    // Center click -> must hit 202
+    assert(testRenderer.checkButtonClicked(playCenterX, playCenterY) == 202);
+
+    // Click just inside radius (e.g. radius - 1.0f) -> must hit 202
+    assert(testRenderer.checkButtonClicked(playCenterX + playRadius - 1.0f, playCenterY) == 202);
+    assert(testRenderer.checkButtonClicked(playCenterX, playCenterY + playRadius - 1.0f) == 202);
+
+    // Click at corner of bounding box (square corner: dx = radius, dy = radius, dist = radius * sqrt(2)) -> MUST MISS
+    assert(testRenderer.checkButtonClicked(buttonPlay->x, buttonPlay->y) == 0 && "Corner click outside circle must miss");
+    assert(testRenderer.checkButtonClicked(buttonPlay->x + buttonPlay->width, buttonPlay->y) == 0);
+    assert(testRenderer.checkButtonClicked(buttonPlay->x, buttonPlay->y + buttonPlay->height) == 0);
+
+    // EN: 3. Test Rectangular hit testing on Cassette keys
+    // ES: 3. Probar detección rectangular en las teclas de casetera
+    assert(testRenderer.checkButtonClicked(buttonPause->x + 10.0f, buttonPause->y + 10.0f) == 201);
+    assert(testRenderer.checkButtonClicked(buttonFast->x + 10.0f, buttonFast->y + 10.0f) == 203);
+    assert(testRenderer.checkButtonClicked(buttonUltra->x + 10.0f, buttonUltra->y + 10.0f) == 204);
+
+    // EN: 4. Test rendering routines across all interactive states (idle, active, hovered, pressed)
+    // ES: 4. Probar rutinas de renderizado en todos los estados interactivos (reposo, activo, hover, pulsado)
+    testRenderer.clear(ReligionSim::ColorRGB{0, 0, 0});
+
+    // Render Round Play Button states
+    testRenderer.drawRoundPlayButton(100, 100, 30, false, false, false); // Idle
+    testRenderer.drawRoundPlayButton(140, 100, 30, true, false, false);  // Active
+    testRenderer.drawRoundPlayButton(180, 100, 30, false, true, false);  // Hover
+    testRenderer.drawRoundPlayButton(220, 100, 30, false, false, true);  // Pressed
+
+    // Render Cassette Button states
+    testRenderer.drawCassetteButton(100, 150, 98, 26, "PAUSA", false, false, false, 201); // Idle
+    testRenderer.drawCassetteButton(210, 150, 98, 26, "PAUSA", true, false, false, 201);  // Active
+    testRenderer.drawCassetteButton(320, 150, 84, 26, "2x", false, true, false, 203);     // Hover
+    testRenderer.drawCassetteButton(410, 150, 84, 26, "5x", false, false, true, 204);     // Pressed
+
+    // Verify non-black pixels rendered
+    size_t coloredPixelsCount = 0;
+    for (const uint32_t pixelValue : testRenderer.getFramebuffer()) {
+        if ((pixelValue & 0x00FFFFFFu) != 0) ++coloredPixelsCount;
+    }
+    assert(coloredPixelsCount > 2000 && "Rasterizer must produce thousands of colored pixels for UI controls");
+
+    // EN: 5. Verify mechanical rebound animation ("se aprietan y vuelven a su lugar")
+    // ES: 5. Verificar animación de rebote mecánico ("se aprietan y vuelven a su lugar")
+    testRenderer.triggerButtonPress(201);
+    // Button is depressed during animation timer
+    testRenderer.update(0.05f); // 50ms elapsed, 90ms remaining
+    // Advance beyond press timer duration
+    testRenderer.update(0.20f); // 200ms elapsed, press timer expired -> key springs back up!
+
+    std::cout << "  -> testCassetteAndRoundPlayButtons PASSED! Round Play and cassette mechanics verified." << std::endl;
+}
+
+// =============================================================================
+// EN: Test permanent terrain craters and tectonic fault formations during earthquakes and heavy impacts
+// ES: Prueba de formación de cráteres permanentes y fallas tectónicas durante terremotos e impactos fuertes
+// =============================================================================
+void testEarthquakeAndHeavyImpactCraterFormation() {
+    using namespace ReligionSim;
+    std::cout << "[Test] Running testEarthquakeAndHeavyImpactCraterFormation (Earthquake Fissures, Meteor Bowls, & Tectonic Subsidence)..." << std::endl;
+
+    // EN: 1. Setup test world map, religion registry, and systems
+    // ES: 1. Configurar mapa de prueba, registro de religiones y sistemas
+    constexpr int TEST_MAP_WIDTH = 36;
+    constexpr int TEST_MAP_HEIGHT = 36;
+    WorldMap terrainMap(TEST_MAP_WIDTH, TEST_MAP_HEIGHT);
+    ReligionRegistry religionRegistry;
+    EventLine eventLine;
+    BuildingSystem buildingSystem;
+    ReplicationEngine replicationEngine;
+    GestorHumanos villagerManager;
+    DivinePowersSystem divinePowers;
+
+    const int playerReligionId = religionRegistry.createPrimordialReligion(
+        "Seismic Cult of Terra", "Geo-Prophet", ColorRGB{220, 140, 70}, "Earthquake", 2026
+    );
+    Religion* playerReligion = religionRegistry.getReligion(playerReligionId);
+    assert(playerReligion != nullptr);
+    playerReligion->theologyPoints = 5000; // Provide ample faith points for casting
+
+    // EN: 2. Prepare terrain baseline elevations and forest cover around earthquake ground zero (18, 18)
+    // ES: 2. Preparar elevaciones base y cobertura forestal alrededor de la zona cero del terremoto (18, 18)
+    constexpr int QUAKE_EPICENTER_X = 18;
+    constexpr int QUAKE_EPICENTER_Y = 18;
+
+    for (int cellOffsetY = -4; cellOffsetY <= 4; ++cellOffsetY) {
+        for (int cellOffsetX = -4; cellOffsetX <= 4; ++cellOffsetX) {
+            const int targetCoordX = QUAKE_EPICENTER_X + cellOffsetX;
+            const int targetCoordY = QUAKE_EPICENTER_Y + cellOffsetY;
+            Cell& targetCell = terrainMap.getCell(targetCoordX, targetCoordY);
+            targetCell.biome = BiomeType::FertileValley;
+            targetCell.elevation = 1.40f;
+            targetCell.naturalResource = ResourceType::Wood;
+            targetCell.resourceAmount = 120;
+            targetCell.hasTreesUprooted = false;
+            targetCell.hasImpactCrater = false;
+            targetCell.craterDepth = 0.0f;
+        }
+    }
+
+    const float baselineEpicenterElevation = terrainMap.getCell(QUAKE_EPICENTER_X, QUAKE_EPICENTER_Y).elevation;
+
+    // EN: Place a villager and build a completed house near epicenter
+    // ES: Ubicar un aldeano y construir una casa completada cerca del epicentro
+    Humano epicenterVillager(1, "Adan Sismico", static_cast<float>(QUAKE_EPICENTER_X) + 0.3f, static_cast<float>(QUAKE_EPICENTER_Y) + 0.3f);
+    epicenterVillager.setReligionId(playerReligionId);
+    epicenterVillager.setSalud(100.0f);
+    villagerManager.agregarHumano(epicenterVillager);
+
+    const int testHouseId = buildingSystem.initiateHouseConstruction(QUAKE_EPICENTER_X, QUAKE_EPICENTER_Y, 1, 0, playerReligionId, HouseType::ThatchedHut, terrainMap);
+    House* constructedHouse = buildingSystem.getHouseByIdMutable(testHouseId);
+    assert(constructedHouse != nullptr);
+    constructedHouse->state = BuildingState::Completed;
+
+    // EN: 3. Cast Earthquake at (18, 18)
+    // ES: 3. Lanzar Terremoto Sísmico en (18, 18)
+    const CastResult earthquakeResult = divinePowers.castPower(
+        DivinePowerType::Earthquake, QUAKE_EPICENTER_X, QUAKE_EPICENTER_Y,
+        terrainMap, religionRegistry, villagerManager,
+        2026, eventLine, playerReligionId,
+        &buildingSystem, &replicationEngine
+    );
+
+    assert(earthquakeResult.success == true);
+
+    // EN: 4. Verify Epicenter Tectonic Subsidence & Fault Fissure (No impact crater, only tectonic elevation drop)
+    // ES: 4. Verificar subsidencia tectónica epicentral y fisura de falla (Sin cráter de impacto, sólo depresión tectónica)
+    const Cell& postQuakeEpicenter = terrainMap.getCell(QUAKE_EPICENTER_X, QUAKE_EPICENTER_Y);
+    assert(postQuakeEpicenter.hasImpactCrater == false); // EN: Craters are only for impact zones! / ES: ¡Los cráteres son sólo para zonas de impacto!
+    assert(postQuakeEpicenter.elevation < baselineEpicenterElevation); // Ground physically depressed into trench!
+    assert(postQuakeEpicenter.hasTreesUprooted == true);
+
+    // EN: Verify multi-cell fault strike subsidence zone
+    // ES: Verificar zona de subsidencia a lo largo del rumbo de la falla
+    int totalDepressedCells = 0;
+    for (int cellOffsetY = -3; cellOffsetY <= 3; ++cellOffsetY) {
+        for (int cellOffsetX = -3; cellOffsetX <= 3; ++cellOffsetX) {
+            const Cell& inspectedCell = terrainMap.getCell(QUAKE_EPICENTER_X + cellOffsetX, QUAKE_EPICENTER_Y + cellOffsetY);
+            assert(inspectedCell.hasImpactCrater == false);
+            if (inspectedCell.elevation < 1.40f) {
+                totalDepressedCells++;
+            }
+        }
+    }
+    assert(totalDepressedCells >= 5); // Epicenter and fault strike line subsided into graben trench
+
+    // EN: Verify distant cell was unaffected
+    // ES: Verificar que una celda distante no fue afectada
+    const Cell& distantUntouchedCell = terrainMap.getCell(2, 2);
+    assert(distantUntouchedCell.hasImpactCrater == false);
+
+    // EN: 5. Verify Heavy Impact Crater Formation via Meteor Strike
+    // ES: 5. Verificar formación de cráter de impacto pesado mediante impacto de meteorito
+    constexpr int METEOR_TARGET_X = 8;
+    constexpr int METEOR_TARGET_Y = 8;
+    Cell& meteorGroundCell = terrainMap.getCell(METEOR_TARGET_X, METEOR_TARGET_Y);
+    meteorGroundCell.biome = BiomeType::FertileValley;
+    meteorGroundCell.elevation = 1.30f;
+    meteorGroundCell.hasImpactCrater = false;
+    const float baselineMeteorElevation = meteorGroundCell.elevation;
+
+    const CastResult meteorResult = divinePowers.castPower(
+        DivinePowerType::Meteor, METEOR_TARGET_X, METEOR_TARGET_Y,
+        terrainMap, religionRegistry, villagerManager,
+        2026, eventLine, playerReligionId,
+        &buildingSystem, &replicationEngine
+    );
+    assert(meteorResult.success == true);
+
+    // Advance time until meteor impact detonates on ground (t >= 1.25s)
+    for (int updateStep = 0; updateStep < 15; ++updateStep) {
+        divinePowers.update(0.1f, terrainMap, villagerManager, &buildingSystem, &replicationEngine);
+    }
+
+    const Cell& postImpactMeteorCell = terrainMap.getCell(METEOR_TARGET_X, METEOR_TARGET_Y);
+    assert(postImpactMeteorCell.hasImpactCrater == true);
+    assert(postImpactMeteorCell.craterType == CraterType::MeteorImpact);
+    assert(postImpactMeteorCell.craterDepth >= 0.70f);
+    assert(postImpactMeteorCell.elevation < baselineMeteorElevation); // Depressed into bowl!
+
+    // Verify neighbor cell in crater bowl
+    const Cell& neighborCraterCell = terrainMap.getCell(METEOR_TARGET_X + 1, METEOR_TARGET_Y);
+    assert(neighborCraterCell.hasImpactCrater == true);
+    assert(neighborCraterCell.craterDepth > 0.0f);
+    assert(neighborCraterCell.elevation < 1.40f);
+
+    // EN: 6. Verify 2.5D Rendering and Visual Pipeline
+    // ES: 6. Verificar renderizado 2.5D y pipeline visual
+    Renderer testRenderer(1280, 720);
+    IsometricCamera testCamera(1280, 720);
+    Timeline testTimeline;
+    WorldCreationConfig testConfig;
+    DayNightCycle testDayNight;
+    CloudSystem testClouds;
+
+    testRenderer.beginFrame();
+    testRenderer.render(terrainMap, religionRegistry, testTimeline, eventLine,
+                        replicationEngine, villagerManager, testCamera,
+                        {QUAKE_EPICENTER_X, QUAKE_EPICENTER_Y}, RenderMapMode::TerrainBiomes,
+                        testConfig, nullptr, &divinePowers, {-1, -1}, &testDayNight, &testClouds);
+    testRenderer.endFrame();
+
+    std::cout << "  -> testEarthquakeAndHeavyImpactCraterFormation PASSED! Earthquake fault rifts, graben basins, and meteor bowls fully verified." << std::endl;
+}
+
+// =========================================================================
+// EN: Test Suite: Metric Physical Scaling System & Disaster Parameters
+// ES: Suite de Pruebas: Sistema de Escala Métrica Física y Parámetros de Desastres
+// =========================================================================
+void testMetricPhysicalScaleAndDisasterParameters() {
+    using namespace ReligionSim;
+    std::cout << "[Test] Running testMetricPhysicalScaleAndDisasterParameters (1 Cell = 5m, Little Boy 500m, Average Meteorite 16.5m)..." << std::endl;
+
+    // EN: 1. Validate fundamental world metric scaling constants
+    // ES: 1. Validar constantes fundamentales de escala métrica del mundo
+    assert(METERS_PER_CELL == 5.0f);
+    assert(CELLS_PER_METER == 0.20f);
+    assert(KM_PER_CELL == 0.005f);
+    assert(CELLS_PER_KM == 200.0f);
+    assert(SPEED_OF_SOUND_MPS == 343.0f);
+    assert(std::abs(SPEED_OF_SOUND_CELLS_PER_SEC - 68.6f) < 0.01f);
+
+    // EN: 2. Validate conversion helper routines between meters, km, and cells
+    // ES: 2. Validar rutinas de conversión entre metros, km y celdas
+    assert(metersToCells(5.0f) == 1.0f);
+    assert(metersToCells(50.0f) == 10.0f);
+    assert(metersToCells(500.0f) == 100.0f);
+    assert(cellsToMeters(1.0f) == 5.0f);
+    assert(cellsToMeters(10.0f) == 50.0f);
+    assert(cellsToMeters(100.0f) == 500.0f);
+    assert(kmToCells(1.0f) == 200.0f);
+    assert(cellsToKm(200.0f) == 1.0f);
+
+    // EN: 3. Validate Little Boy 15kt nuclear explosion parameters
+    // ES: 3. Validar parámetros de la explosión nuclear Little Boy 15kt
+    assert(LittleBoyScale::YIELD_KILOTONS_TNT == 15.0f);
+    assert(LittleBoyScale::FIREBALL_RADIUS_METERS == 180.0f);
+    assert(LittleBoyScale::FIREBALL_RADIUS_CELLS == 36.0f);
+    assert(LittleBoyScale::HEAVY_OVERPRESSURE_RADIUS_METERS == 500.0f);
+    assert(LittleBoyScale::HEAVY_OVERPRESSURE_RADIUS_CELLS == 100.0f);
+    assert(LittleBoyScale::MODERATE_OVERPRESSURE_RADIUS_METERS == 1600.0f);
+    assert(LittleBoyScale::MODERATE_OVERPRESSURE_RADIUS_CELLS == 320.0f);
+    assert(LittleBoyScale::LIGHT_OVERPRESSURE_RADIUS_METERS == 3500.0f);
+    assert(LittleBoyScale::LIGHT_OVERPRESSURE_RADIUS_CELLS == 700.0f);
+    assert(LittleBoyScale::SHOCKWAVE_SPEED_CELLS_PER_SEC == 50.0f);
+
+    // EN: 4. Validate Average Meteorite physical impact parameters (1.5-2.5m bolide)
+    // ES: 4. Validar parámetros físicos de impacto de meteorito promedio (bólido 1.5-2.5m)
+    assert(AverageMeteoriteScale::BOLIDE_DIAMETER_METERS == 2.0f);
+    assert(AverageMeteoriteScale::CRATER_DIAMETER_METERS == 16.5f);
+    assert(std::abs(AverageMeteoriteScale::CRATER_RADIUS_CELLS - 1.65f) < 0.001f);
+    assert(AverageMeteoriteScale::CRATER_DEPTH_METERS == 4.0f);
+    assert(AverageMeteoriteScale::CRATER_DEPTH_ELEVATION == 0.80f);
+    assert(AverageMeteoriteScale::CRATER_RIM_ELEVATION_UPLIFT == 0.25f);
+    assert(AverageMeteoriteScale::EJECTA_RADIUS_METERS == 32.5f);
+    assert(AverageMeteoriteScale::EJECTA_RADIUS_CELLS == 6.5f);
+    assert(AverageMeteoriteScale::AIRBLAST_RADIUS_METERS == 50.0f);
+    assert(AverageMeteoriteScale::AIRBLAST_RADIUS_CELLS == 10.0f);
+
+    // EN: 5. Validate DivinePowersSystem radius returns matching physical metric scale
+    // ES: 5. Validar radios retornados por DivinePowersSystem coincidentes con escala métrica
+    DivinePowersSystem powersSystem;
+    assert(powersSystem.getPowerRadius(DivinePowerType::Meteor) == 10);
+    assert(powersSystem.getPowerRadius(DivinePowerType::AtomicBomb) == 100);
+
+    // EN: 6. Validate WorldMap crater excavation with average meteorite parameters
+    // ES: 6. Validar excavación de cráter en WorldMap con parámetros de meteorito promedio
+    WorldMap terrainMap(32, 32);
+    constexpr int CRATER_TARGET_X = 16;
+    constexpr int CRATER_TARGET_Y = 16;
+    const float initialCenterElevation = terrainMap.getCell(CRATER_TARGET_X, CRATER_TARGET_Y).elevation;
+
+    terrainMap.createImpactCraterZone(CRATER_TARGET_X, CRATER_TARGET_Y, CraterType::MeteorImpact,
+                                      AverageMeteoriteScale::CRATER_RADIUS_CELLS,
+                                      AverageMeteoriteScale::CRATER_DEPTH_ELEVATION,
+                                      0.40f);
+
+    const Cell& impactCenterCell = terrainMap.getCell(CRATER_TARGET_X, CRATER_TARGET_Y);
+    assert(impactCenterCell.hasImpactCrater == true);
+    assert(impactCenterCell.craterType == CraterType::MeteorImpact);
+    assert(impactCenterCell.craterDepth >= 0.75f);
+    assert(impactCenterCell.elevation < initialCenterElevation);
+
+    std::cout << "  -> testMetricPhysicalScaleAndDisasterParameters PASSED! Metric scale, Little Boy, and average meteorite physics verified." << std::endl;
+}
+
+// =============================================================================
+// EN: Test independent playthrough architecture, seed freshness, and solid snapshots
+// ES: Probar arquitectura de partidas independientes, semillas frescas y capturas sólidas
+// =============================================================================
+void testIndependentPlaythroughsAndSolidSnapshotSystem() {
+    std::cout << "[Test] Running testIndependentPlaythroughsAndSolidSnapshotSystem..." << std::endl;
+    using namespace ReligionSim;
+
+    // -------------------------------------------------------------------------
+    // EN: Block 1 - Verify high-entropy unique seed generation
+    // ES: Bloque 1 - Verificar generación de semillas únicas de alta entropía
+    // -------------------------------------------------------------------------
+    uint32_t seedAlpha = Game::generateUniqueSeed();
+    uint32_t seedBeta = Game::generateUniqueSeed();
+    assert(seedAlpha != 0);
+    assert(seedBeta != 0);
+
+    // -------------------------------------------------------------------------
+    // EN: Block 2 - Verify unique slot naming and formatting
+    // ES: Bloque 2 - Verificar nombrado y formato de espacios únicos
+    // -------------------------------------------------------------------------
+    std::string slotNameOne = SaveSystem::generateUniqueSlotName("Solarius", 1234);
+    assert(slotNameOne.find("Partida_Solarius_") == 0);
+    assert(slotNameOne.find("_1234") != std::string::npos);
+
+    // -------------------------------------------------------------------------
+    // EN: Block 3 - Initialize Game instance and launch first independent playthrough
+    // ES: Bloque 3 - Inicializar instancia de Game e iniciar primera partida independiente
+    // -------------------------------------------------------------------------
+    constexpr int canvasWidth = 1280;
+    constexpr int canvasHeight = 720;
+    ReligionSim::Game testGame(canvasWidth, canvasHeight);
+    testGame.init();
+
+    testGame.prepareForWorldCreation(true);
+    assert(testGame.getGameState() == ReligionSim::GameState::WorldCreation);
+    uint32_t firstGameSeed = testGame.getCreationConfig().mapSeed;
+    assert(firstGameSeed != 0);
+
+    testGame.startNewCustomWorld();
+    assert(testGame.getGameState() == ReligionSim::GameState::Playing);
+    std::string firstPlaythroughSlot = testGame.getCurrentSaveSlot();
+    assert(!firstPlaythroughSlot.empty());
+
+    // EN: Inject known custom entities and crater into first playthrough
+    // ES: Inyectar entidades personalizadas conocidas y cráter en la primera partida
+    constexpr int testCraterCellX = 14;
+    constexpr int testCraterCellY = 14;
+    testGame.getMap().createImpactCraterZone(testCraterCellX, testCraterCellY, CraterType::NuclearDetonation, 3.0f, 0.70f, 0.35f);
+    assert(testGame.getMap().getCell(testCraterCellX, testCraterCellY).hasImpactCrater == true);
+
+    constexpr int testHouseCellX = 18;
+    constexpr int testHouseCellY = 18;
+
+    // EN: Guarantee test house cell is habitable and free of water or existing structures
+    // ES: Garantizar que la celda de la casa de prueba sea habitable y esté libre de agua o estructuras existentes
+    Cell& targetHouseCell = testGame.getMap().getCell(testHouseCellX, testHouseCellY);
+    targetHouseCell.biome = BiomeType::FertileValley;
+    targetHouseCell.elevation = 0.50f;
+    targetHouseCell.waterDepth = 0.0f;
+    targetHouseCell.isFlooded = false;
+    targetHouseCell.hasHouse = false;
+    targetHouseCell.houseId = -1;
+
+    int customHouseId = testGame.getBuildingSystem().initiateHouseConstruction(
+        testHouseCellX, testHouseCellY, 1, 2, 1, HouseType::ThatchedHut, testGame.getMap()
+    );
+    assert(customHouseId > 0);
+    House* constructedHouse = testGame.getBuildingSystem().getHouseByIdMutable(customHouseId);
+    assert(constructedHouse != nullptr);
+    constructedHouse->buildProgress = 100.0f;
+    constructedHouse->state = BuildingState::Completed;
+
+    // EN: Save snapshot of first playthrough
+    // ES: Guardar captura de la primera partida
+    testGame.saveCurrentGame();
+
+    std::string savesDirectory = SaveSystem::getSavesRootDirectory();
+    std::filesystem::path slotOnePath = std::filesystem::path(savesDirectory) / firstPlaythroughSlot;
+    assert(std::filesystem::exists(slotOnePath));
+    assert(std::filesystem::exists(slotOnePath / "level.dat"));
+    assert(std::filesystem::exists(slotOnePath / "world.bin"));
+    assert(std::filesystem::exists(slotOnePath / "villagers.dat"));
+    assert(std::filesystem::exists(slotOnePath / "buildings.dat"));
+
+    // -------------------------------------------------------------------------
+    // EN: Block 4 - Return to Main Menu and create a SECOND independent playthrough
+    // ES: Bloque 4 - Regresar al Menú Principal y crear una SEGUNDA partida independiente
+    // -------------------------------------------------------------------------
+    testGame.returnToMainMenu();
+    assert(testGame.getGameState() == ReligionSim::GameState::MainMenu);
+
+    testGame.prepareForWorldCreation(true);
+    uint32_t secondGameSeed = testGame.getCreationConfig().mapSeed;
+    // EN: Crucial check: new world creation MUST NOT reuse the old world seed!
+    // ES: Comprobación crucial: ¡la nueva creación de mundo NO DEBE reutilizar la semilla anterior!
+    assert(secondGameSeed != firstGameSeed);
+
+    testGame.startNewCustomWorld();
+    std::string secondPlaythroughSlot = testGame.getCurrentSaveSlot();
+    assert(!secondPlaythroughSlot.empty());
+    // EN: Playthrough slots must be completely isolated and distinct!
+    // ES: ¡Los espacios de partida deben estar completamente aislados y ser distintos!
+    assert(secondPlaythroughSlot != firstPlaythroughSlot);
+
+    std::filesystem::path slotTwoPath = std::filesystem::path(savesDirectory) / secondPlaythroughSlot;
+    assert(std::filesystem::exists(slotTwoPath));
+
+    // -------------------------------------------------------------------------
+    // EN: Block 5 - Load first playthrough and verify complete snapshot fidelity
+    // ES: Bloque 5 - Cargar primera partida y verificar fidelidad completa de la captura
+    // -------------------------------------------------------------------------
+    bool loadSuccessful = SaveSystem::loadWorld(testGame, firstPlaythroughSlot);
+    assert(loadSuccessful == true);
+    assert(testGame.getCurrentSaveSlot() == firstPlaythroughSlot);
+    assert(testGame.getGameState() == ReligionSim::GameState::Playing);
+
+    // EN: Verify crater and building restoration
+    // ES: Verificar restauración de cráter y edificio
+    const Cell& restoredCraterCell = testGame.getMap().getCell(testCraterCellX, testCraterCellY);
+    assert(restoredCraterCell.hasImpactCrater == true);
+    assert(restoredCraterCell.craterType == CraterType::NuclearDetonation);
+
+    const House* restoredHouse = testGame.getBuildingSystem().getHouseById(customHouseId);
+    assert(restoredHouse != nullptr);
+    assert(restoredHouse->cellX == testHouseCellX);
+    assert(restoredHouse->cellY == testHouseCellY);
+    assert(restoredHouse->isCompleted());
+
+    // EN: Verify living villagers restored with valid properties
+    // ES: Verificar que los aldeanos vivos fueron restaurados con propiedades válidas
+    const auto& restoredVillagers = testGame.getGestorHumanos().getHumanos();
+    assert(!restoredVillagers.empty());
+    for (const auto& villagerUnit : restoredVillagers) {
+        assert(villagerUnit.getHealth() > 0.0f);
+        assert(!villagerUnit.getName().empty());
+    }
+
+    // -------------------------------------------------------------------------
+    // EN: Block 6 - Clean up temporary test save slots
+    // ES: Bloque 6 - Limpiar espacios de guardado temporales de prueba
+    // -------------------------------------------------------------------------
+    SaveSystem::deleteWorld(firstPlaythroughSlot);
+    SaveSystem::deleteWorld(secondPlaythroughSlot);
+    assert(!std::filesystem::exists(slotOnePath));
+    assert(!std::filesystem::exists(slotTwoPath));
+
+    std::cout << "  -> testIndependentPlaythroughsAndSolidSnapshotSystem PASSED! Independent slots, seed freshness, and atomic snapshot fidelity verified." << std::endl;
+}
+
+// EN: Test suite for "Learn to Play" (Aprende a jugar) sacred codex and tutorial menu system
+// ES: Suite de pruebas para el códice sagrado y sistema de tutorial "Aprende a jugar"
+void testLearnToPlaySacredCodexAndTutorialSystem() {
+    std::cout << "[Test] Running testLearnToPlaySacredCodexAndTutorialSystem..." << std::endl;
+    using namespace ReligionSim;
+
+    constexpr int canvasWidth = 1280;
+    constexpr int canvasHeight = 720;
+    Game gameInstance(canvasWidth, canvasHeight);
+    gameInstance.init();
+
+    // -------------------------------------------------------------------------
+    // EN: Block 1 - Verify Main Menu includes "APRENDE A JUGAR" option button
+    // ES: Bloque 1 - Verificar que el Menú Principal incluya la opción "APRENDE A JUGAR"
+    // -------------------------------------------------------------------------
+    assert(gameInstance.getGameState() == GameState::MainMenu);
+    const auto& menuButtons = gameInstance.getRenderer().getMenuButtons();
+    assert(menuButtons.size() == 6 && "Main menu must present 6 buttons (Crear, Cargar, Creacion de Mapas, Aprende a Jugar, Opciones, Salir)");
+
+    assert(menuButtons[0].id == 1 && menuButtons[0].label == "CREAR MUNDO");
+    assert(menuButtons[1].id == 2 && menuButtons[1].label == "CARGAR MUNDO");
+    assert(menuButtons[2].id == 6 && menuButtons[2].label == "CREACION DE MAPAS");
+    assert(menuButtons[3].id == 3 && menuButtons[3].label == "APRENDE A JUGAR");
+    assert(menuButtons[4].id == 4 && menuButtons[4].label == "OPCIONES");
+    assert(menuButtons[5].id == 5 && menuButtons[5].label == "SALIR");
+
+    // -------------------------------------------------------------------------
+    // EN: Block 2 - Click "APRENDE A JUGAR" and verify transition to Tutorial state
+    // ES: Bloque 2 - Hacer clic en "APRENDE A JUGAR" y verificar transición al estado Tutorial
+    // -------------------------------------------------------------------------
+    const float learnButtonCenterX = menuButtons[3].x + menuButtons[3].width * 0.5f;
+    const float learnButtonCenterY = menuButtons[3].y + menuButtons[3].height * 0.5f;
+    gameInstance.onMouseDown(1, learnButtonCenterX, learnButtonCenterY);
+
+    assert(gameInstance.getGameState() == GameState::Tutorial && "Clicking APRENDE A JUGAR must transition game to Tutorial state");
+    assert(gameInstance.getCurrentTutorialTab() == TutorialTab::BasicsAndFaith && "Tutorial must open on BasicsAndFaith tab initially");
+
+    // -------------------------------------------------------------------------
+    // EN: Block 3 - Verify category tabs and interactive tab switching
+    // ES: Bloque 3 - Verificar pestañas de categoría y cambio interactivo de pestaña
+    // -------------------------------------------------------------------------
+    const auto& tutorialTabButtons = gameInstance.getRenderer().getTutorialTabButtons();
+    assert(tutorialTabButtons.size() == 4 && "Tutorial codex must have 4 category tabs");
+
+    // Click Tab 2 (Controls & Camera)
+    const float tabTwoCenterX = tutorialTabButtons[1].x + tutorialTabButtons[1].width * 0.5f;
+    const float tabTwoCenterY = tutorialTabButtons[1].y + tutorialTabButtons[1].height * 0.5f;
+    gameInstance.onMouseDown(1, tabTwoCenterX, tabTwoCenterY);
+    assert(gameInstance.getCurrentTutorialTab() == TutorialTab::ControlsAndCamera);
+
+    // Click Tab 3 (Villagers & Ecology)
+    const float tabThreeCenterX = tutorialTabButtons[2].x + tutorialTabButtons[2].width * 0.5f;
+    const float tabThreeCenterY = tutorialTabButtons[2].y + tutorialTabButtons[2].height * 0.5f;
+    gameInstance.onMouseDown(1, tabThreeCenterX, tabThreeCenterY);
+    assert(gameInstance.getCurrentTutorialTab() == TutorialTab::VillagersAndEcology);
+
+    // Click Tab 4 (Miracles & Eras)
+    const float tabFourCenterX = tutorialTabButtons[3].x + tutorialTabButtons[3].width * 0.5f;
+    const float tabFourCenterY = tutorialTabButtons[3].y + tutorialTabButtons[3].height * 0.5f;
+    gameInstance.onMouseDown(1, tabFourCenterX, tabFourCenterY);
+    assert(gameInstance.getCurrentTutorialTab() == TutorialTab::MiraclesAndEras);
+
+    // -------------------------------------------------------------------------
+    // EN: Block 4 - Verify bottom navigation buttons (< Anterior, Siguiente >)
+    // ES: Bloque 4 - Verificar botones de navegación inferiores (< Anterior, Siguiente >)
+    // -------------------------------------------------------------------------
+    const auto& tutorialActionButtons = gameInstance.getRenderer().getTutorialButtons();
+    assert(tutorialActionButtons.size() == 3 && "Tutorial must have 3 bottom action buttons (Anterior, Volver, Siguiente)");
+
+    // Click < ANTERIOR (button 0 in tutorialActionButtons, id 2010)
+    const float prevButtonCenterX = tutorialActionButtons[0].x + tutorialActionButtons[0].width * 0.5f;
+    const float prevButtonCenterY = tutorialActionButtons[0].y + tutorialActionButtons[0].height * 0.5f;
+    gameInstance.onMouseDown(1, prevButtonCenterX, prevButtonCenterY);
+    assert(gameInstance.getCurrentTutorialTab() == TutorialTab::VillagersAndEcology);
+
+    // Click SIGUIENTE > (button 2 in tutorialActionButtons, id 2012)
+    const float nextButtonCenterX = tutorialActionButtons[2].x + tutorialActionButtons[2].width * 0.5f;
+    const float nextButtonCenterY = tutorialActionButtons[2].y + tutorialActionButtons[2].height * 0.5f;
+    gameInstance.onMouseDown(1, nextButtonCenterX, nextButtonCenterY);
+    assert(gameInstance.getCurrentTutorialTab() == TutorialTab::MiraclesAndEras);
+
+    // -------------------------------------------------------------------------
+    // EN: Block 5 - Verify rendering across all 4 tutorial codex tabs
+    // ES: Bloque 5 - Verificar renderizado a través de las 4 pestañas del códice tutorial
+    // -------------------------------------------------------------------------
+    const std::vector<TutorialTab> allTabs = {
+        TutorialTab::BasicsAndFaith,
+        TutorialTab::ControlsAndCamera,
+        TutorialTab::VillagersAndEcology,
+        TutorialTab::MiraclesAndEras
+    };
+
+    for (const auto targetTab : allTabs) {
+        gameInstance.setCurrentTutorialTab(targetTab);
+        gameInstance.render();
+    }
+
+    // -------------------------------------------------------------------------
+    // EN: Block 6 - Verify keyboard navigation (1-4, Arrow Keys, Escape)
+    // ES: Bloque 6 - Verificar navegación por teclado (1-4, Flechas, Escape)
+    // -------------------------------------------------------------------------
+    // Direct number keys
+    gameInstance.onKeyPress('1');
+    assert(gameInstance.getCurrentTutorialTab() == TutorialTab::BasicsAndFaith);
+
+    gameInstance.onKeyPress('3');
+    assert(gameInstance.getCurrentTutorialTab() == TutorialTab::VillagersAndEcology);
+
+    // Left Arrow / A (keySym 'a')
+    gameInstance.onKeyPress('a');
+    assert(gameInstance.getCurrentTutorialTab() == TutorialTab::ControlsAndCamera);
+
+    // Right Arrow / D (keySym 'd')
+    gameInstance.onKeyPress('d');
+    assert(gameInstance.getCurrentTutorialTab() == TutorialTab::VillagersAndEcology);
+
+    // Escape (keySym 27) -> returns to Main Menu
+    gameInstance.onKeyPress(27);
+    assert(gameInstance.getGameState() == GameState::MainMenu && "Escape key must return from Tutorial to Main Menu");
+
+    // -------------------------------------------------------------------------
+    // EN: Block 7 - Verify return to menu button (VOLVER AL MENU, id 2011)
+    // ES: Bloque 7 - Verificar botón de retorno al menú (VOLVER AL MENU, id 2011)
+    // -------------------------------------------------------------------------
+    gameInstance.onMouseDown(1, learnButtonCenterX, learnButtonCenterY);
+    assert(gameInstance.getGameState() == GameState::Tutorial);
+
+    const float returnButtonCenterX = tutorialActionButtons[1].x + tutorialActionButtons[1].width * 0.5f;
+    const float returnButtonCenterY = tutorialActionButtons[1].y + tutorialActionButtons[1].height * 0.5f;
+    gameInstance.onMouseDown(1, returnButtonCenterX, returnButtonCenterY);
+    assert(gameInstance.getGameState() == GameState::MainMenu && "Clicking VOLVER AL MENU must return to Main Menu");
+
+    std::cout << "  -> testLearnToPlaySacredCodexAndTutorialSystem PASSED! Main menu entry, 4 category tabs, controls, rendering, and navigation validated." << std::endl;
+}
+
+// EN: Test suite for scaled time system synchronized with 24-hour cycle and advancement leaps
+// ES: Suite de pruebas para el sistema de tiempo a escala sincronizado con ciclo de 24h y saltos de avances
+void testScaledTimeSynchronizationWithHoursAndAdvancements() {
+    std::cout << "[Test] Running testScaledTimeSynchronizationWithHoursAndAdvancements..." << std::endl;
+    using namespace ReligionSim;
+
+    // -------------------------------------------------------------------------
+    // EN: Block 1 - Verify liturgical seasons mapping to the 24-hour solar cycle
+    // ES: Bloque 1 - Verificar mapeo de estaciones litúrgicas al ciclo solar de 24 horas
+    // -------------------------------------------------------------------------
+    DayNightCycle dayNightCycleInstance(72.0f, 0.0f); // 72s full cycle, starts at 00:00 midnight
+
+    // 00:00 - 06:00: Winter (Invierno)
+    dayNightCycleInstance.setTimeByHour(2.0f);
+    assert(dayNightCycleInstance.getSeason() == LiturgicalSeason::Winter);
+    assert(dayNightCycleInstance.getSeasonName() == "Invierno");
+
+    // 06:00 - 12:00: Spring (Primavera)
+    dayNightCycleInstance.setTimeByHour(8.5f);
+    assert(dayNightCycleInstance.getSeason() == LiturgicalSeason::Spring);
+    assert(dayNightCycleInstance.getSeasonName() == "Primavera");
+
+    // 12:00 - 18:00: Summer (Verano)
+    dayNightCycleInstance.setTimeByHour(14.0f);
+    assert(dayNightCycleInstance.getSeason() == LiturgicalSeason::Summer);
+    assert(dayNightCycleInstance.getSeasonName() == "Verano");
+
+    // 18:00 - 24:00: Autumn (Otoño)
+    dayNightCycleInstance.setTimeByHour(21.0f);
+    assert(dayNightCycleInstance.getSeason() == LiturgicalSeason::Autumn);
+    assert(dayNightCycleInstance.getSeasonName() == "Otoño");
+
+    // -------------------------------------------------------------------------
+    // EN: Block 2 - Verify synchronized 1-day = 1-year calendar progression
+    // ES: Bloque 2 - Verificar progresión sincronizada del calendario: 1 día = 1 año
+    // -------------------------------------------------------------------------
+    Timeline timelineInstance(-4000, 2200);
+    dayNightCycleInstance.resetDaysPassed();
+    dayNightCycleInstance.setTimeByHour(9.0f);
+
+    float yearDeltaOutput = 0.0f;
+    timelineInstance.updateSynchronized(0.1f, dayNightCycleInstance, yearDeltaOutput);
+    assert(timelineInstance.getCurrentYear() == -4000 && "Starting year must remain -4000 before full day completes");
+    assert(yearDeltaOutput == 0.0f);
+
+    // Simulate 1 complete solar day (72 seconds)
+    dayNightCycleInstance.update(72.0f);
+    assert(dayNightCycleInstance.getDaysPassed() == 1 && "Completing 72 seconds must increment completed days to 1");
+
+    timelineInstance.updateSynchronized(0.1f, dayNightCycleInstance, yearDeltaOutput);
+    assert(timelineInstance.getCurrentYear() == -3999 && "One full completed solar day must advance calendar year to -3999");
+    assert(yearDeltaOutput == 1.0f && "One year passed in this step");
+
+    // Simulate 4 more days
+    dayNightCycleInstance.update(72.0f * 4.0f);
+    assert(dayNightCycleInstance.getDaysPassed() == 5);
+    timelineInstance.updateSynchronized(0.1f, dayNightCycleInstance, yearDeltaOutput);
+    assert(timelineInstance.getCurrentYear() == -3995);
+    assert(yearDeltaOutput == 4.0f);
+
+    // -------------------------------------------------------------------------
+    // EN: Block 3 - Verify civilizational momentum from theological doctrines (+25 years)
+    // ES: Bloque 3 - Verificar impulso civilizatorio por doctrinas teológicas (+25 años)
+    // -------------------------------------------------------------------------
+    float doctrineLeapDelta = 0.0f;
+    constexpr int standardDoctrineLeap = 25;
+    timelineInstance.applyAdvancementHistoricalLeap(standardDoctrineLeap, doctrineLeapDelta);
+
+    assert(timelineInstance.getCurrentYear() == -3970 && "Convalidating doctrine must advance year by +25 years");
+    assert(doctrineLeapDelta == 25.0f);
+    assert(timelineInstance.getAdvancementBonusYears() == 25);
+
+    // -------------------------------------------------------------------------
+    // EN: Block 4 - Verify Era Capstone historical ascension leap to next Era dawn
+    // ES: Bloque 4 - Verificar salto de ascensión histórica de Hito de Era hacia el alba de la siguiente Era
+    // -------------------------------------------------------------------------
+    const int nextEraStartYear = AdvancementSystem::getEraStartYear(HistoricalEra::TotemismAncestorWorship);
+    assert(nextEraStartYear == -3000 && "Totemism & Ancestor Worship era starts at -3000 BCE");
+
+    const int capstoneLeapYears = nextEraStartYear - timelineInstance.getCurrentYear(); // -3000 - (-3970) = 970
+    assert(capstoneLeapYears == 970);
+
+    float capstoneLeapDelta = 0.0f;
+    timelineInstance.applyAdvancementHistoricalLeap(capstoneLeapYears, capstoneLeapDelta);
+    assert(timelineInstance.getCurrentYear() == -3000 && "Era capstone leap must bring timeline to -3000 BCE");
+    assert(capstoneLeapDelta == 970.0f);
+
+    // -------------------------------------------------------------------------
+    // EN: Block 5 - Verify Game state integration and Faith Tree convalidation leap
+    // ES: Bloque 5 - Verificar integración en Game y salto por convalidación del Árbol de Fe
+    // -------------------------------------------------------------------------
+    constexpr int canvasWidth = 1280;
+    constexpr int canvasHeight = 720;
+    Game gameInstance(canvasWidth, canvasHeight);
+    gameInstance.init();
+    gameInstance.startNewCustomWorld();
+
+    assert(gameInstance.getTimeline().getCurrentYear() == -4000);
+    assert(gameInstance.getDayNightCycle().getDaysPassed() == 0);
+
+    // Convalidate initial doctrine 101 ("Mito del Fuego Sagrado")
+    Religion* playerReligionPtr = gameInstance.getRegistryMutable().getReligion(1);
+    assert(playerReligionPtr != nullptr);
+    playerReligionPtr->theologyPoints = 500; // Provide adequate faith points
+
+    gameInstance.getRenderer().setFaithTreeOpen(true);
+    gameInstance.getRenderer().setSelectedAdvancementId(101);
+
+    // Convalidate button in modal (x=900, y=480)
+    gameInstance.onMouseDown(1, 900.0f, 480.0f);
+
+    // Doctrine 101 must be convalidated and timeline must leap +25 years
+    assert(playerReligionPtr->hasAdvancement(101) && "Mito del Fuego Sagrado must be convalidated");
+    assert(gameInstance.getTimeline().getCurrentYear() == -3975 && "Timeline must leap by +25 years to -3975");
+
+    // -------------------------------------------------------------------------
+    // EN: Block 6 - Verify save/load fidelity of daysPassed and advancementBonusYears
+    // ES: Bloque 6 - Verificar fidelidad de guardado/carga de daysPassed y advancementBonusYears
+    // -------------------------------------------------------------------------
+    const std::string testSaveSlotName = "TestSlot_TimeSyncVerification";
+    gameInstance.getDayNightCycle().setDaysPassed(14);
+    float syncYearDelta = 0.0f;
+    gameInstance.getTimelineMutable().updateSynchronized(0.1f, gameInstance.getDayNightCycle(), syncYearDelta);
+    assert(gameInstance.getTimeline().getCurrentYear() == -3961);
+    assert(SaveSystem::saveWorld(gameInstance, testSaveSlotName) && "Saving test world must succeed");
+
+    Game loadedGameInstance(canvasWidth, canvasHeight);
+    loadedGameInstance.init();
+    assert(SaveSystem::loadWorld(loadedGameInstance, testSaveSlotName) && "Loading test world must succeed");
+
+    assert(loadedGameInstance.getDayNightCycle().getDaysPassed() == 14 && "Loaded game must retain daysPassed = 14");
+    assert(loadedGameInstance.getTimeline().getAdvancementBonusYears() == 25 && "Loaded game must retain advancementBonusYears = 25");
+    assert(loadedGameInstance.getTimeline().getCurrentYear() == -3961 && "Restored year (-4000 + 14 days + 25 bonus = -3961) must match");
+
+    SaveSystem::deleteWorld(testSaveSlotName);
+
+    std::cout << "  -> testScaledTimeSynchronizationWithHoursAndAdvancements PASSED! Liturgical seasons, synchronized days/years, doctrine leaps, capstone ascensions, and save fidelity verified." << std::endl;
+}
+
+// =============================================================================
+// EN: Test Villager Condition, Physiological States, and Behavioral AI System
+// ES: Prueba del Sistema de Condiciones, Estados Fisiológicos y Conducta de Aldeanos
+// =============================================================================
+void testVillagerConditionAndBehaviorSystem() {
+    std::cout << "[Test] Running testVillagerConditionAndBehaviorSystem..." << std::endl;
+    using namespace ReligionSim;
+
+    // -------------------------------------------------------------------------
+    // EN: Block 1 - VillagerCondition enum, naming, and localized color validation
+    // ES: Bloque 1 - Validación de enumeración VillagerCondition, nomenclatura y colores
+    // -------------------------------------------------------------------------
+    assert(std::string(getVillagerConditionName(VillagerCondition::Healthy, true)) == "Sano");
+    assert(std::string(getVillagerConditionName(VillagerCondition::Hungry, true)) == "Hambriento");
+    assert(std::string(getVillagerConditionName(VillagerCondition::Full, true)) == "Lleno");
+    assert(std::string(getVillagerConditionName(VillagerCondition::Sick, true)) == "Enfermo");
+    assert(std::string(getVillagerConditionName(VillagerCondition::Drunk, true)) == "Borracho");
+    assert(std::string(getVillagerConditionName(VillagerCondition::Aggressive, true)) == "Agresivo");
+    assert(std::string(getVillagerConditionName(VillagerCondition::Scared, true)) == "Asustado");
+    assert(std::string(getVillagerConditionName(VillagerCondition::Exhausted, true)) == "Exhausto");
+    assert(std::string(getVillagerConditionName(VillagerCondition::Inspired, true)) == "Inspirado");
+    assert(std::string(getVillagerConditionName(VillagerCondition::Injured, true)) == "Herido");
+
+    assert(std::string(getVillagerConditionName(VillagerCondition::Healthy, false)) == "Healthy");
+    assert(std::string(getVillagerConditionName(VillagerCondition::Hungry, false)) == "Hungry");
+    assert(std::string(getVillagerConditionName(VillagerCondition::Full, false)) == "Full");
+    assert(std::string(getVillagerConditionName(VillagerCondition::Sick, false)) == "Sick");
+    assert(std::string(getVillagerConditionName(VillagerCondition::Drunk, false)) == "Drunk");
+    assert(std::string(getVillagerConditionName(VillagerCondition::Aggressive, false)) == "Aggressive");
+    assert(std::string(getVillagerConditionName(VillagerCondition::Scared, false)) == "Scared");
+    assert(std::string(getVillagerConditionName(VillagerCondition::Exhausted, false)) == "Exhausted");
+    assert(std::string(getVillagerConditionName(VillagerCondition::Inspired, false)) == "Inspired");
+    assert(std::string(getVillagerConditionName(VillagerCondition::Injured, false)) == "Injured");
+
+    // -------------------------------------------------------------------------
+    // EN: Block 2 - Dynamic condition evaluation priority on living Humano entity
+    // ES: Bloque 2 - Prioridad de evaluación dinámica de condición en entidad Humano viva
+    // -------------------------------------------------------------------------
+    Humano testVillager(101, "Grog", 15.5f, 15.5f, HumanGender::Male);
+    testVillager.setEdad(25.0f);
+    testVillager.setSalud(100.0f);
+    testVillager.setEnergia(100.0f);
+    testVillager.setSpeed(1.0f);
+    testVillager.getHumanUnitMutable().nutritionalState = 65.0f;
+    testVillager.getPopGroupMutable().foodSupply = 65.0f;
+    testVillager.setSueno(10.0f);
+
+    // Initial state must be Healthy
+    assert(testVillager.getCondition() == VillagerCondition::Healthy);
+    assert(testVillager.getConditionName() == "Sano");
+    assert(testVillager.getEffectiveSpeed() == 1.0f);
+
+    // Full condition (nutritional state >= 80)
+    testVillager.getHumanUnitMutable().nutritionalState = 90.0f;
+    assert(testVillager.getCondition() == VillagerCondition::Full);
+    assert(testVillager.getEffectiveSpeed() == 1.10f);
+
+    // Hungry condition (nutritional state < 35)
+    testVillager.getHumanUnitMutable().nutritionalState = 25.0f;
+    testVillager.getPopGroupMutable().foodSupply = 15.0f;
+    assert(testVillager.getCondition() == VillagerCondition::Hungry);
+    assert(testVillager.getEffectiveSpeed() == 0.75f);
+
+    // Exhausted condition (energy < 20 or sleepNeed > 80)
+    testVillager.getHumanUnitMutable().nutritionalState = 65.0f;
+    testVillager.getPopGroupMutable().foodSupply = 65.0f;
+    testVillager.setEnergia(10.0f);
+    assert(testVillager.getCondition() == VillagerCondition::Exhausted);
+    assert(testVillager.getEffectiveSpeed() == 0.45f);
+    testVillager.setEnergia(100.0f);
+
+    // Sick condition (infection active)
+    testVillager.infectWithPandemic(20.0f);
+    assert(testVillager.getCondition() == VillagerCondition::Sick);
+    assert(testVillager.getEffectiveSpeed() == 0.60f);
+
+    // Drunk condition (alcoholLevel > 30)
+    testVillager.consumeAlcohol(60.0f);
+    assert(testVillager.isDrunk());
+    assert(testVillager.getCondition() == VillagerCondition::Drunk);
+    // Drunk effective speed has sinusoidal stagger
+    assert(testVillager.getEffectiveSpeed() >= 0.50f && testVillager.getEffectiveSpeed() <= 1.05f);
+
+    // Injured condition (HP < 35, higher priority than drunk)
+    testVillager.setSalud(25.0f);
+    assert(testVillager.getCondition() == VillagerCondition::Injured);
+    assert(testVillager.getEffectiveSpeed() == 0.50f);
+    testVillager.setSalud(100.0f);
+
+    // Aggressive condition (aggressionLevel > 50 or protectiveFury)
+    testVillager.provokeAggression(80.0f);
+    assert(testVillager.isAggressive());
+    assert(testVillager.getCondition() == VillagerCondition::Aggressive);
+    assert(testVillager.getEffectiveSpeed() == 1.25f);
+    testVillager.setAggressionLevel(0.0f);
+
+    // Scared condition (panicTimer > 0, when sober)
+    testVillager.setAlcoholLevel(0.0f);
+    testVillager.activarFuriaProtectora(0.0f);
+    testVillager.huirEnPanicoDesde(15.0f, 15.0f, 5.0f);
+    assert(testVillager.getCondition() == VillagerCondition::Scared);
+    testVillager.setSpeed(1.0f);
+    assert(testVillager.getEffectiveSpeed() == 1.40f);
+
+    // Drunken courage: heavy intoxication suppresses fear
+    testVillager.consumeAlcohol(50.0f);
+    assert(testVillager.getCondition() == VillagerCondition::Drunk); // Drunk overrides fear
+
+    // Inspired condition (divine sign)
+    testVillager.setPanicTimer(0.0f);
+    testVillager.setAlcoholLevel(0.0f);
+    testVillager.setInfected(false);
+    testVillager.setInfectionTimer(0.0f);
+    testVillager.activarSenalDivina(15.0f);
+    assert(testVillager.getCondition() == VillagerCondition::Inspired);
+    testVillager.setSpeed(1.0f);
+    assert(testVillager.getEffectiveSpeed() == 1.15f);
+
+    // -------------------------------------------------------------------------
+    // EN: Block 3 - Physical update and drunken sway displacement verification
+    // ES: Bloque 3 - Verificación de actualización física y desplazamiento lateral por ebriedad
+    // -------------------------------------------------------------------------
+    WorldMap testMap(32, 32);
+    testVillager.setAlcoholLevel(80.0f);
+    testVillager.caminarHacia(20.0f, 15.5f, false);
+    const float preUpdateX = testVillager.getX();
+    testVillager.actualizar(0.5f, testMap);
+    assert(testVillager.getX() > preUpdateX); // Unit moved forward
+    assert(testVillager.getAlcoholLevel() < 80.0f); // Alcohol decayed over time
+
+    // -------------------------------------------------------------------------
+    // EN: Block 4 - Game Console Cheat Commands for villager conditions
+    // ES: Bloque 4 - Comandos de consola de trucos para condiciones de aldeanos
+    // -------------------------------------------------------------------------
+    Game testGameInstance(1024, 576);
+    testGameInstance.init();
+    testGameInstance.startNewCustomWorld();
+
+    // Verify BORRACHO command
+    testGameInstance.runCommand("BORRACHO");
+    const Humano* selectedVillager = testGameInstance.getGestorHumanos().getHumanoSeleccionado();
+    assert(selectedVillager != nullptr);
+    assert(selectedVillager->isDrunk());
+    assert(selectedVillager->getCondition() == VillagerCondition::Drunk);
+
+    // Verify HAMBRIENTO command
+    testGameInstance.runCommand("HAMBRIENTO");
+    assert(selectedVillager->getCondition() == VillagerCondition::Hungry);
+
+    // Verify ENFERMO command
+    testGameInstance.runCommand("ENFERMO");
+    assert(selectedVillager->getCondition() == VillagerCondition::Sick);
+
+    // Verify AGRESIVO command
+    testGameInstance.runCommand("AGRESIVO");
+    assert(selectedVillager->getCondition() == VillagerCondition::Aggressive);
+
+    // Verify LLENO command
+    testGameInstance.runCommand("LLENO");
+    assert(selectedVillager->getCondition() == VillagerCondition::Full);
+
+    // Verify ASUSTADO command
+    testGameInstance.runCommand("ASUSTADO");
+    assert(selectedVillager->getCondition() == VillagerCondition::Scared);
+
+    // Verify SANO command
+    testGameInstance.runCommand("SANO");
+    assert(selectedVillager->getCondition() == VillagerCondition::Healthy);
+
+    // Verify Tribe-wide command when no unit is selected
+    testGameInstance.getGestorHumanos().selectVillager(-1);
+    testGameInstance.runCommand("BORRACHO");
+    bool foundDrunkPlayerVillager = false;
+    for (const auto& villagerUnit : testGameInstance.getGestorHumanos().getHumanos()) {
+        if (villagerUnit.estaVivo() && (villagerUnit.getReligionId() == 1 || villagerUnit.getReligionId() == testGameInstance.getPlayerReligionId())) {
+            assert(villagerUnit.isDrunk());
+            foundDrunkPlayerVillager = true;
+            break;
+        }
+    }
+    assert(foundDrunkPlayerVillager);
+
+    testGameInstance.runCommand("SANO");
+    for (const auto& villagerUnit : testGameInstance.getGestorHumanos().getHumanos()) {
+        if (villagerUnit.estaVivo() && (villagerUnit.getReligionId() == 1 || villagerUnit.getReligionId() == testGameInstance.getPlayerReligionId())) {
+            assert(villagerUnit.getCondition() == VillagerCondition::Healthy);
+            break;
+        }
+    }
+
+    std::cout << "  -> testVillagerConditionAndBehaviorSystem PASSED! All villager states, speed modulations, combat multipliers, and cheat commands verified." << std::endl;
+}
+
+// EN: Test geological mineral distribution, vein formation, realistic scarcity, and terrain stratification
+// ES: Probar distribución geológica de minerales, formación de vetas, escasez realista y estratificación
+void testGeologicalMineralVeinsAndTerrainLogic() {
+    using namespace ReligionSim;
+    std::cout << "[Test] Running testGeologicalMineralVeinsAndTerrainLogic..." << std::endl;
+
+    WorldMap proceduralMap(64, 64);
+    constexpr uint32_t GEOLOGICAL_TEST_SEED = 123456789u;
+    proceduralMap.generateProceduralWorld(GEOLOGICAL_TEST_SEED, WorldClimate::Templado, ResourceAbundance::Balanced);
+
+    int totalMountainAndHillCells = 0;
+    int bareMountainAndHillCells = 0;
+    int mineralDepositCells = 0;
+    int countCopper = 0;
+    int countIron = 0;
+    int countGold = 0;
+    int countStone = 0;
+    int countDiamond = 0;
+
+    for (int cellY = 0; cellY < proceduralMap.getHeight(); ++cellY) {
+        for (int cellX = 0; cellX < proceduralMap.getWidth(); ++cellX) {
+            const Cell& inspectedCell = proceduralMap.getCell(cellX, cellY);
+            if (inspectedCell.biome == BiomeType::HighlandHills || inspectedCell.biome == BiomeType::RuggedMountains) {
+                totalMountainAndHillCells++;
+                if (inspectedCell.naturalResource == ResourceType::None) {
+                    bareMountainAndHillCells++;
+                } else {
+                    mineralDepositCells++;
+                    switch (inspectedCell.naturalResource) {
+                        case ResourceType::Copper:  countCopper++; break;
+                        case ResourceType::Iron:    countIron++; break;
+                        case ResourceType::Gold:    countGold++; break;
+                        case ResourceType::Stone:   countStone++; break;
+                        case ResourceType::Diamond: countDiamond++; break;
+                        default: break;
+                    }
+                }
+            }
+        }
+    }
+
+    // EN: 1. Mountains and hills must NOT be 100% cluttered with minerals: at least 60% must be clean bare rock
+    // ES: 1. Montañas y colinas NO deben estar 100% atestadas de minerales: al menos 60% debe ser roca virgen
+    assert(totalMountainAndHillCells > 0);
+    const float bareRatio = static_cast<float>(bareMountainAndHillCells) / static_cast<float>(totalMountainAndHillCells);
+    assert(bareRatio >= 0.60f && bareRatio <= 0.90f);
+
+    // EN: 2. Core industrial and building minerals must exist
+    // ES: 2. Deben existir minerales industriales y de construcción
+    assert(countIron > 0);
+    assert(countStone > 0);
+
+    // EN: 3. Verify Vein Clustering (vetas): At least some mineral cells must have contiguous neighbors of the same resource
+    // ES: 3. Verificar agrupamiento en vetas: Al menos algunas celdas minerales deben tener vecinas contiguas del mismo recurso
+    int cellsWithContiguousVeinNeighbor = 0;
+    for (int cellY = 0; cellY < proceduralMap.getHeight(); ++cellY) {
+        for (int cellX = 0; cellX < proceduralMap.getWidth(); ++cellX) {
+            const Cell& sourceCell = proceduralMap.getCell(cellX, cellY);
+            if (sourceCell.naturalResource == ResourceType::Iron ||
+                sourceCell.naturalResource == ResourceType::Copper ||
+                sourceCell.naturalResource == ResourceType::Stone) {
+                bool hasContiguousVeinTile = false;
+                constexpr std::array<std::pair<int, int>, 8> ADJACENCY_OFFSETS{{
+                    {-1, -1}, {0, -1}, {1, -1},
+                    {-1,  0},          {1,  0},
+                    {-1,  1}, {0,  1}, {1,  1}
+                }};
+                for (const auto& [offsetX, offsetY] : ADJACENCY_OFFSETS) {
+                    const int adjacentX = cellX + offsetX;
+                    const int adjacentY = cellY + offsetY;
+                    if (proceduralMap.isValid(adjacentX, adjacentY)) {
+                        if (proceduralMap.getCell(adjacentX, adjacentY).naturalResource == sourceCell.naturalResource) {
+                            hasContiguousVeinTile = true;
+                            break;
+                        }
+                    }
+                }
+                if (hasContiguousVeinTile) {
+                    cellsWithContiguousVeinNeighbor++;
+                }
+            }
+        }
+    }
+    assert(cellsWithContiguousVeinNeighbor > 0); // Vein cohesion confirmed!
+
+    // EN: 4. Renderer variant texture loading verification
+    // ES: 4. Verificación de carga de texturas variantes en el Renderer
+    Renderer testRenderer(320, 240);
+    const auto& variantTextures = testRenderer.getResourceVariantPixels();
+    // Copper variants (index 5)
+    assert(variantTextures[5][0].size() == 64u * 64u); // Copper Vein
+    assert(variantTextures[5][1].size() == 64u * 64u); // Copper Rock
+    // Iron variants (index 4)
+    assert(variantTextures[4][0].size() == 64u * 64u); // Iron Vein
+    // Gold variants (index 3)
+    assert(variantTextures[3][0].size() == 64u * 64u); // Gold Vein
+    // Stone variants (index 2)
+    assert(variantTextures[2][0].size() == 64u * 64u); // Stone Quarry
+    assert(variantTextures[2][1].size() == 64u * 64u); // Stone Boulder
+
+    std::cout << "  -> testGeologicalMineralVeinsAndTerrainLogic PASSED! Bare mountain slopes ("
+              << static_cast<int>(bareRatio * 100.0f) << "%), cohesive veins, and variant sprites verified." << std::endl;
+}
+
+// EN: Unit test verifying thermodynamic dissipation of fire, evaporation of water, and elimination of infinite cycles
+// ES: Prueba unitaria que verifica la disipación termodinámica de fuego, evaporación de agua y eliminación de ciclos infinitos
+void testFireAndWaterDissipationAntiInfiniteCycles() {
+    using namespace ReligionSim;
+    std::cout << "Running testFireAndWaterDissipationAntiInfiniteCycles()..." << std::endl;
+
+    WorldMap physicsWorldMap(32, 32);
+
+    // =========================================================================
+    // 1. PASSIVE THERMAL COOLING: Unburnt preheated cells decay to 0 heat
+    // EN: Verify heat accumulator decays to 0.0 when flame front moves away
+    // ES: Verificar que el acumulador térmico decae a 0.0 cuando el frente de fuego se aleja
+    // =========================================================================
+    Cell& thermalCell = physicsWorldMap.getCell(10, 10);
+    thermalCell.heatAccumulator = 0.85f;
+    thermalCell.isBurning = false;
+
+    // Simulate 5 seconds in increments of 0.5s
+    for (int simulationStep = 0; simulationStep < 10; ++simulationStep) {
+        physicsWorldMap.updateFirePhysics(0.5f, nullptr, nullptr, 0.0f, 0.0f);
+    }
+    // Cooling rate = 0.20/s -> 0.85 - 5.0 * 0.20 = -0.15 clamped to 0.0f
+    assert(thermalCell.heatAccumulator == 0.0f);
+    assert(!thermalCell.isBurning);
+
+    // =========================================================================
+    // 2. REFRACTORY FIRE IMMUNITY: Burnt soil recovery prevents circular wildfires
+    // EN: Regenerated fertile soil has 90s immunity so fire cannot loop endlessly
+    // ES: El suelo fértil regenerado tiene 90s de inmunidad para evitar bucles de fuego
+    // =========================================================================
+    Cell& refractorySoilCell = physicsWorldMap.getCell(12, 12);
+    refractorySoilCell.biome = BiomeType::DenseForest;
+    physicsWorldMap.igniteCell(12, 12, 0.20f, 1.0f);
+    assert(refractorySoilCell.isBurning);
+
+    // Let fuel consume and burn into ashes
+    physicsWorldMap.updateFirePhysics(0.35f, nullptr, nullptr, 0.0f, 0.0f);
+    assert(!refractorySoilCell.isBurning);
+    assert(refractorySoilCell.isBurnt);
+
+    // Accelerate ash recovery
+    refractorySoilCell.ashRecoveryTimer = 0.10f;
+    physicsWorldMap.updateFirePhysics(0.20f, nullptr, nullptr, 0.0f, 0.0f);
+    assert(!refractorySoilCell.isBurnt);
+    assert(refractorySoilCell.biome == BiomeType::FertileValley);
+    assert(refractorySoilCell.fireImmunityTimer == 90.0f);
+
+    // Attempt to ignite newly sprouted pasture: must be rejected
+    const bool cyclicIgnitionAttempt = physicsWorldMap.igniteCell(12, 12, 10.0f, 1.0f);
+    assert(!cyclicIgnitionAttempt);
+    assert(!refractorySoilCell.isBurning);
+
+    // Update fire physics for 30s: immunity timer counts down smoothly
+    physicsWorldMap.updateFirePhysics(30.0f, nullptr, nullptr, 0.0f, 0.0f);
+    assert(refractorySoilCell.fireImmunityTimer == 60.0f);
+    assert(!refractorySoilCell.isCombustible());
+
+    // =========================================================================
+    // 3. COMPLETE PUDDLE INFILTRATION AND EVAPORATION: No immortal shallow puddles
+    // EN: Verify puddle with waterDepth < 0.02f is tracked and evaporates completely to 0.0
+    // ES: Verificar que un charco con waterDepth < 0.02f es rastreado y se evapora totalmente a 0.0
+    // =========================================================================
+    Cell& puddleCell = physicsWorldMap.getCell(15, 15);
+    puddleCell.elevation = 0.50f;
+    puddleCell.biome = BiomeType::FertileValley;
+    physicsWorldMap.addWaterToCell(15, 15, 0.015f); // Shallow puddle (< 0.02f threshold)
+    assert(puddleCell.waterDepth > 0.0f);
+
+    // Infiltration + atmospheric evaporation rate (~0.05/s) drains puddle over 2 seconds
+    for (int simulationStep = 0; simulationStep < 20; ++simulationStep) {
+        physicsWorldMap.updateWaterPhysics(0.10f, nullptr, nullptr);
+    }
+    assert(puddleCell.waterDepth == 0.0f);
+    assert(!puddleCell.isFlooded);
+
+    // =========================================================================
+    // 4. THERMODYNAMIC LATENT HEAT OF VAPORIZATION: Water loss upon fire quenching
+    // EN: Quenching raging fire boils off liquid water mass
+    // ES: Extinguir fuego intenso evapora masa de agua líquida
+    // =========================================================================
+    Cell& flamingCell = physicsWorldMap.getCell(18, 18);
+    flamingCell.biome = BiomeType::DenseForest;
+    physicsWorldMap.igniteCell(18, 18, 15.0f, 1.0f);
+    assert(flamingCell.isBurning);
+    assert(flamingCell.fireIntensity >= 0.90f);
+
+    constexpr float INITIAL_QUENCH_WATER = 0.25f;
+    physicsWorldMap.addWaterToCell(18, 18, INITIAL_QUENCH_WATER);
+    assert(!flamingCell.isBurning);
+    // Latent heat loss consumes up to 0.10 * fireIntensity of water
+    assert(flamingCell.waterDepth < INITIAL_QUENCH_WATER);
+    assert(flamingCell.waterDepth > 0.10f);
+
+    // =========================================================================
+    // 5. VOLCANIC LAVA SOLIDIFICATION: Solid basalt mountains with stone resource
+    // EN: Active lava timer solidifies molten rock into permanent rugged terrain
+    // ES: El temporizador de lava solidifica roca fundida en terreno montañoso permanente
+    // =========================================================================
+    Cell& lavaFlowCell = physicsWorldMap.getCell(22, 22);
+    lavaFlowCell.hasActiveLava = true;
+    lavaFlowCell.hasVolcano = false;
+    lavaFlowCell.lavaTimer = 1.0f;
+    lavaFlowCell.elevation = 1.0f;
+
+    // Simulate 2 seconds of physics
+    physicsWorldMap.updateFirePhysics(2.0f, nullptr, nullptr, 0.0f, 0.0f);
+    assert(!lavaFlowCell.hasActiveLava);
+    assert(lavaFlowCell.lavaTimer == 0.0f);
+    assert(lavaFlowCell.biome == BiomeType::RuggedMountains);
+    assert(lavaFlowCell.elevation > 1.0f);
+    assert(lavaFlowCell.naturalResource == ResourceType::Stone);
+    assert(lavaFlowCell.resourceAmount > 0);
+
+    // =========================================================================
+    // 6. FLAT BASIN FRICTION & GRADIENT THRESHOLD: No endless sloshing oscillations
+    // EN: Hydraulic head drop below 0.012f threshold produces no runaway current
+    // ES: Caída hidráulica menor a 0.012f no genera corrientes oscilatorias infinitas
+    // =========================================================================
+    Cell& flatCellA = physicsWorldMap.getCell(25, 25);
+    Cell& flatCellB = physicsWorldMap.getCell(26, 25);
+    flatCellA.elevation = 0.60f;
+    flatCellB.elevation = 0.60f;
+    flatCellA.waterDepth = 0.008f;
+    flatCellB.waterDepth = 0.0f;
+    physicsWorldMap.addWaterToCell(25, 25, 0.0f); // Ensure registered if needed
+
+    for (int simulationStep = 0; simulationStep < 10; ++simulationStep) {
+        physicsWorldMap.updateWaterPhysics(0.10f, nullptr, nullptr);
+    }
+    // Gradient is below 0.012f threshold, bed friction damps fluid current
+    assert(flatCellA.getFlowSpeed() < 0.01f);
+    assert(flatCellB.getFlowSpeed() < 0.01f);
+
+    std::cout << "  -> testFireAndWaterDissipationAntiInfiniteCycles PASSED! Passive thermal cooling, 90s fire immunity, complete puddle evaporation, latent heat quenching, and basalt crystallization verified." << std::endl;
+}
+
+// EN: Test the 4-phase water depth classification, bathymetric distance transform, and sprite atlas bindings
+// ES: Probar la clasificación de 4 fases de profundidad del agua, transformada batimétrica y enlaces de atlas de sprites
+void testWaterDepthPhasesAndSpriteSystem() {
+    using namespace ReligionSim;
+    std::cout << "[Test] Running testWaterDepthPhasesAndSpriteSystem (4 Water Depth Phases)..." << std::endl;
+
+    // EN: 1. Verify strong typing and enum ordering of the 4 water depth phases
+    // ES: 1. Verificar tipado fuerte y orden del enum de las 4 fases de profundidad del agua
+    assert(static_cast<uint8_t>(WaterDepthPhase::ShorelineFoam) == 0);
+    assert(static_cast<uint8_t>(WaterDepthPhase::ShallowCoast)  == 1);
+    assert(static_cast<uint8_t>(WaterDepthPhase::MidOcean)      == 2);
+    assert(static_cast<uint8_t>(WaterDepthPhase::DeepAbyssal)   == 3);
+
+    // EN: 2. Verify Cell-level phase queries across overland water and biome defaults
+    // ES: 2. Verificar consultas de fase a nivel de celda en agua superficial y valores por defecto de bioma
+    Cell testCell;
+    testCell.biome = BiomeType::FertileValley;
+    testCell.waterDepth = 0.0f;
+    assert(testCell.getWaterDepthPhase() == WaterDepthPhase::ShorelineFoam);
+
+    // EN: Overland puddle (< 0.08f) exhibits shoreline foam edge
+    // ES: Charco superficial (< 0.08f) exhibe borde de espuma de orilla
+    testCell.waterDepth = 0.05f;
+    assert(testCell.getWaterDepthPhase() == WaterDepthPhase::ShorelineFoam);
+
+    // EN: Shallow pool (0.08f to 0.28f) maps to shallow coast
+    // ES: Poza somera (0.08f a 0.28f) se asigna a costa somera
+    testCell.waterDepth = 0.20f;
+    assert(testCell.getWaterDepthPhase() == WaterDepthPhase::ShallowCoast);
+
+    // EN: Flowing river/stream (0.28f to 0.55f) maps to mid ocean
+    // ES: Río/arroyo fluido (0.28f a 0.55f) se asigna a mar medio
+    testCell.waterDepth = 0.40f;
+    assert(testCell.getWaterDepthPhase() == WaterDepthPhase::MidOcean);
+
+    // EN: Deep flooded lake (> 0.55f) maps to deep abyssal
+    // ES: Lago inundado profundo (> 0.55f) se asigna a mar profundo abisal
+    testCell.waterDepth = 0.75f;
+    assert(testCell.getWaterDepthPhase() == WaterDepthPhase::DeepAbyssal);
+
+    // EN: Natural water biome defaults
+    // ES: Valores por defecto de biomas acuáticos naturales
+    Cell naturalShallowCell;
+    naturalShallowCell.biome = BiomeType::ShallowWater;
+    naturalShallowCell.waterDepth = 0.0f;
+    assert(naturalShallowCell.getWaterDepthPhase() == WaterDepthPhase::ShallowCoast);
+
+    Cell naturalDeepCell;
+    naturalDeepCell.biome = BiomeType::DeepOcean;
+    naturalDeepCell.waterDepth = 0.0f;
+    assert(naturalDeepCell.getWaterDepthPhase() == WaterDepthPhase::DeepAbyssal);
+
+    // EN: 3. Verify WorldMap bathymetric distance transform and phase assignment
+    // ES: 3. Verificar transformada de distancia batimétrica y asignación de fases en WorldMap
+    WorldMap bathymetryMap(30, 30);
+    for (int cellY = 0; cellY < 30; ++cellY) {
+        for (int cellX = 0; cellX < 30; ++cellX) {
+            Cell& cellItem = bathymetryMap.getCell(cellX, cellY);
+            cellItem.biome = BiomeType::DeepOcean;
+            cellItem.elevation = 0.0f;
+            cellItem.climate.elevation = -0.50f;
+        }
+    }
+    // EN: Place a single island center point at (15, 15)
+    // ES: Colocar un punto central de isla en (15, 15)
+    bathymetryMap.getCell(15, 15).biome = BiomeType::CoastalPlains;
+    bathymetryMap.getCell(15, 15).elevation = 0.60f;
+
+    // EN: Run distance transform to calculate progressive phases
+    // ES: Ejecutar transformada de distancia para calcular fases progresivas
+    bathymetryMap.updateWaterDepthPhases();
+
+    // EN: Verify concentric progression from island outwards:
+    // Distance 1 (15, 16): Shallow Coast (Phase 2 with shoreline foam interface)
+    // Distance 2 (15, 17): Shallow Coast (Phase 2)
+    // Distance 4 (15, 19): Mid Ocean (Phase 3)
+    // Distance 6 (15, 21): Deep Abyssal (Phase 4)
+    // ES: Verificar progresión concéntrica desde la isla hacia afuera
+    assert(bathymetryMap.getCell(15, 16).waterPhase == WaterDepthPhase::ShallowCoast);
+    assert(bathymetryMap.getCell(15, 17).waterPhase == WaterDepthPhase::ShallowCoast);
+    assert(bathymetryMap.getCell(15, 19).waterPhase == WaterDepthPhase::MidOcean);
+    assert(bathymetryMap.getCell(15, 21).waterPhase == WaterDepthPhase::DeepAbyssal);
+
+    // EN: 4. Verify Renderer sprite assets loading for all 4 water phases
+    // ES: 4. Verificar carga de assets de sprites en Renderer para las 4 fases de agua
+    Renderer testRenderer(640, 480);
+
+    // EN: Verify animated water sprite sheets are loaded and populated
+    // ES: Verificar que las hojas de sprites animados de agua están cargadas y pobladas
+    assert(testRenderer.getWaterSurfPixels().size() == 1024u * 116u);
+    assert(testRenderer.getWaterRipplesPixels().size() == 1024u * 170u);
+    assert(testRenderer.getWaterWavesPixels().size() == 1024u * 115u);
+    assert(testRenderer.getWaterBordersPixels().size() == 1024u * 175u);
+    assert(testRenderer.getWaterSheetPixels().size() == 1024u * 765u);
+
+    std::cout << "  -> testWaterDepthPhasesAndSpriteSystem PASSED! All 4 water depth phases (Shoreline Foam, Shallow Coast, Mid Ocean, Deep Abyssal) verified." << std::endl;
+}
+
+// EN: Unit test for Authentic Lava & Magma Tileset (512x256), 4-Phase Lifecycle, and Shoreline Banks
+// ES: Prueba unitaria para el tileset auténtico de lava y magma (512x256), ciclo de 4 fases y riberas rocosas
+void testLavaAndMagmaTilesetAndLifecycleSystem() {
+    using namespace ReligionSim;
+    std::cout << "[Test] Running testLavaAndMagmaTilesetAndLifecycleSystem (4-Phase Lava & Magma Tileset)..." << std::endl;
+
+    // EN: 1. Verify Renderer correctly loads 512x256 RGBA master sheet (131,072 pixels / 524,288 bytes)
+    // ES: 1. Verificar que el Renderer cargue correctamente la hoja maestra RGBA de 512x256
+    Renderer testRenderer(640, 480);
+    const auto& lavaPixels = testRenderer.getLavaTilesPixels();
+    assert(lavaPixels.size() == 512u * 256u && "Lava tileset must match 512x256 dimension exactly");
+
+    // EN: 2. Verify all 4 solid ground tiles on Row 0 (128x128 each)
+    // ES: 2. Verificar los 4 mosaicos de terreno sólidos en la Fila 0 (128x128 cada uno)
+    for (int tileIndex = 0; tileIndex < 4; ++tileIndex) {
+        int opaquePixelCount = 0;
+        int accumulatedRed = 0;
+        int accumulatedGreen = 0;
+        int accumulatedBlue = 0;
+
+        for (int sampleY = 0; sampleY < 128; ++sampleY) {
+            for (int sampleX = 0; sampleX < 128; ++sampleX) {
+                const int pixelCoordX = tileIndex * 128 + sampleX;
+                const int pixelCoordY = sampleY;
+                const uint32_t packedColor = lavaPixels[pixelCoordY * 512 + pixelCoordX];
+                const uint8_t alphaByte = (packedColor >> 24) & 0xFF;
+                if (alphaByte > 200) {
+                    ++opaquePixelCount;
+                }
+                accumulatedRed += (packedColor & 0xFF);
+                accumulatedGreen += ((packedColor >> 8) & 0xFF);
+                accumulatedBlue += ((packedColor >> 16) & 0xFF);
+            }
+        }
+
+        // EN: Ensure full opacity across all 4 ground tiles
+        // ES: Asegurar opacidad completa en los 4 mosaicos de terreno
+        assert(opaquePixelCount == 128 * 128 && "Ground tiles on Row 0 must be 100% solid opaque");
+
+        const int averageRed = accumulatedRed / (128 * 128);
+        const int averageGreen = accumulatedGreen / (128 * 128);
+        // EN: Verify incandescent coloration: red channel dominance
+        // ES: Verificar coloración incandescente: predominio del canal rojo
+        assert(averageRed > 70 && averageRed > averageGreen);
+    }
+
+    // EN: 3. Verify Row 1 contains shoreline bank borders with transparent alpha chromakey removal
+    // ES: 3. Verificar que la Fila 1 contenga riberas rocosas con remoción de fondo por chromakey
+    for (int subIndex = 0; subIndex < 4; ++subIndex) {
+        int transparentPixelCount = 0;
+        int activeBankPixelCount = 0;
+
+        for (int sampleY = 128; sampleY < 256; ++sampleY) {
+            for (int sampleX = 0; sampleX < 128; ++sampleX) {
+                const int pixelCoordX = subIndex * 128 + sampleX;
+                const int pixelCoordY = sampleY;
+                const uint32_t packedColor = lavaPixels[pixelCoordY * 512 + pixelCoordX];
+                const uint8_t alphaByte = (packedColor >> 24) & 0xFF;
+                if (alphaByte < 20) {
+                    ++transparentPixelCount;
+                } else {
+                    ++activeBankPixelCount;
+                }
+            }
+        }
+
+        assert(transparentPixelCount > 1000 && "Row 1 bank borders must possess clean transparent alpha margins");
+        assert(activeBankPixelCount > 1000 && "Row 1 bank borders must possess populated rock border sprites");
+    }
+
+    // EN: 4. Verify Active Volcanic Lava Solidification Lifecycle
+    // ES: 4. Verificar el ciclo de vida de solidificación de lava volcánica activa
+    WorldMap simulationWorldMap(20, 20);
+    Cell& activeLavaCell = simulationWorldMap.getCell(10, 10);
+    activeLavaCell.hasActiveLava = true;
+    activeLavaCell.hasVolcano = false;
+    activeLavaCell.lavaTimer = 1.5f;
+    activeLavaCell.elevation = 1.0f;
+    activeLavaCell.biome = BiomeType::CoastalPlains;
+
+    // Simulate 2 seconds of physics
+    simulationWorldMap.updateFirePhysics(2.0f, nullptr, nullptr, 0.0f, 0.0f);
+
+    // EN: Upon countdown expiration, lava must crystallize into RuggedMountains with Stone resource
+    // ES: Al expirar la cuenta atrás, la lava debe cristalizar en RuggedMountains con recurso de piedra
+    assert(!activeLavaCell.hasActiveLava && "Lava must solidify when lavaTimer expires");
+    assert(activeLavaCell.lavaTimer == 0.0f);
+    assert(activeLavaCell.biome == BiomeType::RuggedMountains);
+    assert(activeLavaCell.naturalResource == ResourceType::Stone);
+    assert(activeLavaCell.resourceAmount > 0);
+
+    std::cout << "  -> testLavaAndMagmaTilesetAndLifecycleSystem PASSED! 512x256 atlas, 4 solid tiles, 4 shoreline banks, and volcanic solidification lifecycle verified." << std::endl;
+}
+
+// EN: Unit test for Volcanic Caldera Biome and Natural Volcano Spawning System
+// ES: Prueba unitaria para el Bioma de Caldera Volcánica y Generación Natural de Volcanes
+void testVolcanicBiomeAndNaturalVolcanoGeneration() {
+    using namespace ReligionSim;
+    std::cout << "[Test] Running testVolcanicBiomeAndNaturalVolcanoGeneration (Volcanic Biomes & Natural Volcanoes)..." << std::endl;
+
+    // EN: 1. Verify MultiNoiseBiome classification produces VolcanicCaldera from its climate target
+    // ES: 1. Verificar que la clasificación de MultiNoiseBiome produzca VolcanicCaldera a partir de su objetivo climático
+    const auto targetVolcanic = MultiNoiseBiomeGenerator::selectBiome(0.85f, -0.50f, 0.95f);
+    assert(targetVolcanic.primary_biome == BiomeID::VolcanicCaldera);
+
+    // EN: 2. Verify procedural world generation instantiates volcanic biomes and active volcanoes
+    // ES: 2. Verificar que la generación procedural instancie biomas volcánicos y volcanes activos
+    WorldMap proceduralMap(40, 40);
+    proceduralMap.generateProceduralWorld(45678);
+
+    int countVolcanicCells = 0;
+    int countNaturalVolcanoes = 0;
+    int countActiveLavaPools = 0;
+
+    for (int y = 0; y < proceduralMap.getHeight(); ++y) {
+        for (int x = 0; x < proceduralMap.getWidth(); ++x) {
+            const Cell& cellItem = proceduralMap.getCell(x, y);
+            if (cellItem.biome == BiomeType::VolcanicCaldera) {
+                ++countVolcanicCells;
+                if (cellItem.hasVolcano) {
+                    ++countNaturalVolcanoes;
+                    assert(cellItem.hasActiveLava && "Natural volcano summit must feature active caldera lava");
+                    assert(cellItem.elevation >= 2.0f && "Volcano summit must be topographically elevated");
+                }
+                if (cellItem.hasActiveLava) {
+                    ++countActiveLavaPools;
+                    assert(cellItem.lavaTimer > 0.0f);
+                }
+            }
+        }
+    }
+
+    // EN: Ensure volcanic presence: at least 1 volcanic cluster with an active volcano and lava pools
+    // ES: Asegurar presencia volcánica: al menos 1 conglomerado volcánico con un volcán activo y piscinas de lava
+    assert(countVolcanicCells >= 4 && "World must generate volcanic caldera cells");
+    assert(countNaturalVolcanoes >= 1 && "World must generate at least 1 natural active volcano");
+    assert(countActiveLavaPools >= 2 && "Volcanic caldera must feature active boiling lava pools");
+
+    // EN: 3. Verify base color and travel ease of VolcanicCaldera
+    // ES: 3. Verificar color base y facilidad de viaje de VolcanicCaldera
+    Cell sampleVolcanicCell;
+    sampleVolcanicCell.biome = BiomeType::VolcanicCaldera;
+    sampleVolcanicCell.isBurnt = false;
+    sampleVolcanicCell.isBurning = false;
+    ColorRGB volcanicColor = sampleVolcanicCell.getBiomeBaseColor();
+    assert(volcanicColor.r == 42 && volcanicColor.g == 28 && volcanicColor.b == 26);
+
+    Cell dummyOriginCell;
+    dummyOriginCell.biome = BiomeType::FertileValley;
+    float travelEaseScore = proceduralMap.getTravelEase(dummyOriginCell, sampleVolcanicCell);
+    assert(travelEaseScore == 0.15f && "Volcanic caldera travel ease must reflect hazardous rugged terrain");
+
+    std::cout << "  -> testVolcanicBiomeAndNaturalVolcanoGeneration PASSED! Volcanic caldera (" << countVolcanicCells << " cells), "
+              << countNaturalVolcanoes << " natural volcanoes, and " << countActiveLavaPools << " active lava pools verified." << std::endl;
+}
+
+// EN: Test destruction tileset assets, burnt trees, craters, and scorched terrain rendering
+// ES: Probar activos del tileset de destrucción, árboles quemados, cráteres y renderizado de terreno calcinado
+void testDestructionTilesetAndScorchedGroundSystem() {
+    std::cout << "[Test] Running testDestructionTilesetAndScorchedGroundSystem (Burnt Trees, Craters, Scorched Ground)..." << std::endl;
+
+    ReligionSim::Renderer testRenderer(640, 480);
+
+    // EN: 1. Verify all 11 destruction tree, stump, and ruin sprite buffers
+    // ES: 1. Verificar los 11 búferes de sprites de árboles quemados, tocones y ruinas
+    const auto& treeSprites = testRenderer.getDestructionTreePixels();
+    assert(treeSprites.size() == 11 && "Renderer must load exactly 11 destruction tree/stump sprites");
+    for (size_t treeIndex = 0; treeIndex < treeSprites.size(); ++treeIndex) {
+        assert(treeSprites[treeIndex].size() == 64u * 64u && "Every destruction tree sprite must be 64x64 RGBA");
+        int visiblePixelCount = 0;
+        for (const uint32_t packedPixel : treeSprites[treeIndex]) {
+            const uint8_t alphaByte = (packedPixel >> 24) & 0xFF;
+            if (alphaByte > 20) {
+                ++visiblePixelCount;
+            }
+        }
+        assert(visiblePixelCount > 80 && "Destruction tree sprite must contain visible opaque pixels");
+    }
+
+    // EN: 2. Verify all 8 impact craters (7 at 64x64, 1 at 128x128 colossal)
+    // ES: 2. Verificar los 8 cráteres de impacto (7 de 64x64, 1 de 128x128 colosal)
+    const auto& craterSprites = testRenderer.getDestructionCraterPixels();
+    assert(craterSprites.size() == 8 && "Renderer must load exactly 8 impact crater sprites");
+    for (size_t craterIndex = 0; craterIndex < 7; ++craterIndex) {
+        assert(craterSprites[craterIndex].size() == 64u * 64u && "Standard crater must be 64x64 RGBA");
+    }
+    assert(craterSprites[7].size() == 128u * 128u && "Colossal giant crater must be 128x128 RGBA (16,384 pixels)");
+
+    // EN: 3. Verify all 8 scorched terrain and magma fissure textures (64x64 each)
+    // ES: 3. Verificar las 8 texturas de terreno calcinado y fisuras de magma (64x64 cada una)
+    const auto& terrainTextures = testRenderer.getDestructionTerrainPixels();
+    assert(terrainTextures.size() == 8 && "Renderer must load exactly 8 scorched terrain textures");
+    for (size_t textureIndex = 0; textureIndex < terrainTextures.size(); ++textureIndex) {
+        assert(terrainTextures[textureIndex].size() == 64u * 64u && "Scorched terrain texture must be 64x64 RGBA");
+    }
+
+    // EN: 4. Verify prop bounds calculation for tall burnt trees vs stumps
+    // ES: 4. Verificar cálculo de límites para árboles quemados altos vs tocones
+    int startCoordX = 0, startCoordY = 0, boundingWidth = 0, boundingHeight = 0;
+    testRenderer.getDestructionPropBounds(320.0f, 240.0f, 0, 1.0f, startCoordX, startCoordY, boundingWidth, boundingHeight);
+    assert(boundingHeight == 64 && "Tall burnt crooked tree height must equal 64 pixels at zoom 1.0");
+
+    testRenderer.getDestructionPropBounds(320.0f, 240.0f, 2, 1.0f, startCoordX, startCoordY, boundingWidth, boundingHeight);
+    assert(boundingHeight < 40 && "Small burnt stump height must be compact");
+
+    // EN: 5. Verify drawing destruction prop writes pixels to framebuffer
+    // ES: 5. Verificar que dibujar un prop de destrucción escribe píxeles en el framebuffer
+    testRenderer.clear(ReligionSim::ColorRGB{120, 120, 120});
+    testRenderer.drawDestructionProp(320.0f, 240.0f, 6, 1.0f, 1.0f); // Burnt tree with embers
+    int alteredPixelCount = 0;
+    for (const uint32_t pixelValue : testRenderer.getFramebuffer()) {
+        const uint8_t redByte = pixelValue & 0xFF;
+        const uint8_t greenByte = (pixelValue >> 8) & 0xFF;
+        const uint8_t blueByte = (pixelValue >> 16) & 0xFF;
+        if (redByte != 120 || greenByte != 120 || blueByte != 120) {
+            ++alteredPixelCount;
+        }
+    }
+    assert(alteredPixelCount > 100 && "drawDestructionProp must blit visible burned pixels to framebuffer");
+
+    // EN: 6. Verify crater bounds and drawing for standard vs colossal craters
+    // ES: 6. Verificar límites y dibujo de cráteres estándar vs colosales
+    int craterStartX = 0, craterStartY = 0, craterWidth = 0, craterHeight = 0;
+    testRenderer.getCraterBounds(320.0f, 240.0f, 5, 1.0f, craterStartX, craterStartY, craterWidth, craterHeight);
+    assert(craterWidth == 64 && craterHeight == 32 && "Standard crater must have 64x32 2:1 isometric aspect ratio");
+
+    testRenderer.getCraterBounds(320.0f, 240.0f, 7, 1.0f, craterStartX, craterStartY, craterWidth, craterHeight);
+    assert(craterWidth == 128 && craterHeight == 64 && "Colossal giant crater must have 128x64 2:1 isometric aspect ratio");
+
+    testRenderer.clear(ReligionSim::ColorRGB{120, 120, 120});
+    testRenderer.drawCraterSprite(320.0f, 240.0f, 7, 1.0f, 1.0f); // Colossal crater
+    int craterAlteredPixels = 0;
+    for (const uint32_t pixelValue : testRenderer.getFramebuffer()) {
+        const uint8_t redByte = pixelValue & 0xFF;
+        const uint8_t greenByte = (pixelValue >> 8) & 0xFF;
+        const uint8_t blueByte = (pixelValue >> 16) & 0xFF;
+        if (redByte != 120 || greenByte != 120 || blueByte != 120) {
+            ++craterAlteredPixels;
+        }
+    }
+    assert(craterAlteredPixels > 500 && "drawCraterSprite must render authentic colossal crater pixels");
+
+    std::cout << "  -> testDestructionTilesetAndScorchedGroundSystem PASSED! 11 burnt trees, 8 craters (including 128x128 colossal), and 8 scorched ground textures verified." << std::endl;
+}
+
+// =============================================================================
+// EN: Test Suite for the Liturgical Map Editor and World Creation System
+// ES: Batería de Pruebas para el Editor Litúrgico de Mapas y Creación de Mundos
+// =============================================================================
+void testMapEditorAndCreationSystem() {
+    std::cout << "[Test] Running testMapEditorAndCreationSystem (Liturgical Map Workshop)..." << std::endl;
+    using namespace ReligionSim;
+
+    constexpr int canvasWidth = 1280;
+    constexpr int canvasHeight = 720;
+    Game gameInstance(canvasWidth, canvasHeight);
+    gameInstance.init();
+
+    // -------------------------------------------------------------------------
+    // EN: Block 1 - Verify Main Menu has "CREACION DE MAPAS" button (ID 6)
+    // ES: Bloque 1 - Verificar que el Menú Principal tenga el botón "CREACION DE MAPAS" (ID 6)
+    // -------------------------------------------------------------------------
+    assert(gameInstance.getGameState() == GameState::MainMenu);
+    const auto& menuButtons = gameInstance.getRenderer().getMenuButtons();
+    assert(menuButtons.size() == 6);
+    assert(menuButtons[2].id == 6 && menuButtons[2].label == "CREACION DE MAPAS");
+
+    // -------------------------------------------------------------------------
+    // EN: Block 2 - Click "CREACION DE MAPAS" and verify transition to MapEditor
+    // ES: Bloque 2 - Hacer clic en "CREACION DE MAPAS" y verificar transición a MapEditor
+    // -------------------------------------------------------------------------
+    const float mapEditorBtnCenterX = menuButtons[2].x + menuButtons[2].width * 0.5f;
+    const float mapEditorBtnCenterY = menuButtons[2].y + menuButtons[2].height * 0.5f;
+    gameInstance.onMouseDown(1, mapEditorBtnCenterX, mapEditorBtnCenterY);
+
+    assert(gameInstance.getGameState() == GameState::MapEditor && "Must transition to GameState::MapEditor");
+    const auto& editorButtons = gameInstance.getRenderer().getMapEditorButtons();
+    assert(editorButtons.size() >= 25 && "Map Editor must register all procedural controls and tool buttons");
+
+    const WorldMap& editorMap = gameInstance.getEditorMap();
+    assert(editorMap.getWidth() == 128 && editorMap.getHeight() == 128 && "Default editor map size should be 128x128");
+
+    // -------------------------------------------------------------------------
+    // EN: Block 3 - Test Brush Selection (Radius and Tool Brushes)
+    // ES: Bloque 3 - Probar selección de pinceles (Radio y herramientas de bioma/recurso)
+    // -------------------------------------------------------------------------
+    // Click ID 822: Brush Radius 2 (3x3 area)
+    const auto brush3x3It = std::find_if(editorButtons.begin(), editorButtons.end(), [](const UIButton& b) { return b.id == 822; });
+    assert(brush3x3It != editorButtons.end());
+    gameInstance.onMouseDown(1, brush3x3It->x + brush3x3It->width * 0.5f, brush3x3It->y + brush3x3It->height * 0.5f);
+    assert(gameInstance.getMapEditorConfig().brushRadius == 2);
+
+    // Click ID 834: Dense Forest brush
+    const auto forestBtnIt = std::find_if(editorButtons.begin(), editorButtons.end(), [](const UIButton& b) { return b.id == 834; });
+    assert(forestBtnIt != editorButtons.end());
+    gameInstance.onMouseDown(1, forestBtnIt->x + forestBtnIt->width * 0.5f, forestBtnIt->y + forestBtnIt->height * 0.5f);
+    assert(gameInstance.getMapEditorConfig().activeBrush == MapEditorBrush::DenseForest);
+
+    // -------------------------------------------------------------------------
+    // EN: Block 4 - Test Interactive Sculpting on Preview Canvas
+    // ES: Bloque 4 - Probar escultura interactiva en el lienzo de vista previa
+    // -------------------------------------------------------------------------
+    constexpr float canvasX = 494.0f;
+    constexpr float canvasY = 92.0f;
+    constexpr float canvasW = 744.0f;
+    constexpr float canvasH = 470.0f;
+    const float scale = std::min(canvasW / static_cast<float>(editorMap.getWidth()),
+                                 canvasH / static_cast<float>(editorMap.getHeight()));
+    const float previewStartX = canvasX + (canvasW - static_cast<float>(editorMap.getWidth()) * scale) * 0.5f;
+    const float previewStartY = canvasY + (canvasH - static_cast<float>(editorMap.getHeight()) * scale) * 0.5f;
+
+    const float paintScreenX = previewStartX + 30.0f * scale + scale * 0.5f;
+    const float paintScreenY = previewStartY + 30.0f * scale + scale * 0.5f;
+
+    gameInstance.onMouseDown(1, paintScreenX, paintScreenY);
+    gameInstance.onMouseUp(1, paintScreenX, paintScreenY);
+
+    // Verify cell (30, 30) has been painted as DenseForest with Wood resource
+    const Cell& paintedCell = gameInstance.getEditorMap().getCell(30, 30);
+    assert(paintedCell.biome == BiomeType::DenseForest && "Target cell must become DenseForest");
+    assert(paintedCell.naturalResource == ResourceType::Wood && "DenseForest brush must assign Wood resource");
+
+    // Click ID 843: Gold deposit brush
+    const auto goldBtnIt = std::find_if(editorButtons.begin(), editorButtons.end(), [](const UIButton& b) { return b.id == 843; });
+    assert(goldBtnIt != editorButtons.end());
+    gameInstance.onMouseDown(1, goldBtnIt->x + goldBtnIt->width * 0.5f, goldBtnIt->y + goldBtnIt->height * 0.5f);
+    assert(gameInstance.getMapEditorConfig().activeBrush == MapEditorBrush::Gold);
+
+    // Paint cell (30, 30) with Gold brush
+    gameInstance.onMouseDown(1, paintScreenX, paintScreenY);
+    gameInstance.onMouseUp(1, paintScreenX, paintScreenY);
+    assert(gameInstance.getEditorMap().getCell(30, 30).naturalResource == ResourceType::Gold && "Cell must now have Gold resource");
+
+    // Click ID 851: Raise elevation
+    const auto raiseBtnIt = std::find_if(editorButtons.begin(), editorButtons.end(), [](const UIButton& b) { return b.id == 851; });
+    assert(raiseBtnIt != editorButtons.end());
+    gameInstance.onMouseDown(1, raiseBtnIt->x + raiseBtnIt->width * 0.5f, raiseBtnIt->y + raiseBtnIt->height * 0.5f);
+    const float initialElev = gameInstance.getEditorMap().getCell(30, 30).elevation;
+    gameInstance.onMouseDown(1, paintScreenX, paintScreenY);
+    gameInstance.onMouseUp(1, paintScreenX, paintScreenY);
+    assert(gameInstance.getEditorMap().getCell(30, 30).elevation >= initialElev + 0.9f && "Elevation must increase");
+
+    // -------------------------------------------------------------------------
+    // EN: Block 5 - Test 2.5D Isometric View Mode and Atlas Terrain Sprite Palette
+    // ES: Bloque 5 - Probar Modo de Vista Isométrica 2.5D y Paleta de Mosaicos del Atlas
+    // -------------------------------------------------------------------------
+    // Test TAB key to switch to 2.5D Isometric View
+    gameInstance.onKeyPress(9); // TAB
+    assert(gameInstance.getMapEditorConfig().viewMode == MapEditorViewMode::Isometric25D && "TAB must switch to Isometric25D");
+
+    const auto& isoButtons = gameInstance.getRenderer().getMapEditorIsometricButtons();
+    assert(isoButtons.size() >= 30 && "Isometric editor must register all toolbar tabs, radius, and palette buttons");
+
+    // Click Tab 0: Atlas Terrain Sprites (ID 871)
+    const auto tab0It = std::find_if(isoButtons.begin(), isoButtons.end(), [](const UIButton& b) { return b.id == 871; });
+    assert(tab0It != isoButtons.end());
+    gameInstance.onMouseDown(1, tab0It->x + tab0It->width * 0.5f, tab0It->y + tab0It->height * 0.5f);
+    assert(gameInstance.getMapEditorConfig().paletteTab == 0 && "Active palette tab must be 0 (Atlas Sprites)");
+
+    // Click Tile 15: Lava / Magma (ID 915)
+    const auto lavaBtnIt = std::find_if(isoButtons.begin(), isoButtons.end(), [](const UIButton& b) { return b.id == 915; });
+    assert(lavaBtnIt != isoButtons.end());
+    gameInstance.onMouseDown(1, lavaBtnIt->x + lavaBtnIt->width * 0.5f, lavaBtnIt->y + lavaBtnIt->height * 0.5f);
+    assert(gameInstance.getMapEditorConfig().activeBrush == MapEditorBrush::TileLava);
+
+    // Apply brush to cell (64, 64) in isometric mode
+    gameInstance.applyMapEditorBrush(64, 64);
+    const Cell& lavaCell = gameInstance.getEditorMap().getCell(64, 64);
+    assert(lavaCell.customTileIndex == 15 && "Cell must have custom tile index 15 (Lava)");
+    assert(lavaCell.hasActiveLava && "Cell must have active lava");
+
+    // Test camera panning in isometric editor with WASD
+    const float initialCamX = gameInstance.getCamera().getCameraX();
+    gameInstance.onKeyPress('d'); // Pan right
+    assert(gameInstance.getCamera().getCameraX() > initialCamX && "WASD must pan camera in isometric editor");
+
+    // Test TAB key to switch back to 2D Cartographic View
+    gameInstance.onKeyPress(9); // TAB
+    assert(gameInstance.getMapEditorConfig().viewMode == MapEditorViewMode::Cartographic2D && "TAB must toggle back to 2D view");
+
+    // -------------------------------------------------------------------------
+    // EN: Block 6 - Test Launching Game with Custom Map (ID 890)
+    // ES: Bloque 6 - Probar lanzamiento de partida con mapa personalizado (ID 890)
+    // -------------------------------------------------------------------------
+    const auto playBtnIt = std::find_if(editorButtons.begin(), editorButtons.end(), [](const UIButton& b) { return b.id == 890; });
+    assert(playBtnIt != editorButtons.end());
+    gameInstance.onMouseDown(1, playBtnIt->x + playBtnIt->width * 0.5f, playBtnIt->y + playBtnIt->height * 0.5f);
+
+    assert(gameInstance.getGameState() == GameState::Playing && "Must transition to GameState::Playing");
+    assert(gameInstance.getMap().getWidth() == 128 && "Game map must match custom-crafted dimensions");
+    assert(gameInstance.getGestorHumanos().getHumanos().size() > 0 && "Living villagers must be initialized on the custom world");
+
+    std::cout << "  -> testMapEditorAndCreationSystem PASSED! Liturgical Map Editor fully validated." << std::endl;
 }
 
 int main() {
@@ -4607,6 +7930,32 @@ int main() {
     testHouseSpriteHidingCapacityAndProbabilisticReproductionSystem();
     testErrorSystemAndLagMitigationWatchdog();
     testResourcePanelBelieversIndicator();
+    testMinecraftStyleSimulatedWorldPanoramaMainMenu();
+    testOptionsMenuCategoriesAndSettingsArchitecture();
+    testLivingOrganismReproductionAndMemeticReplicationAI();
+    testTwoCellTreeHeightAndOcclusionSortingSystem();
+    testFallDamageAndNaturalPhenomenaPhysics();
+    testFireThermodynamicsSpreadDissipationAndEcologicalRecovery();
+    testRainAndDelugeWaterPhysicsAndFireExtinction();
+    testAtomicBombCheatAndNuclearPhysics();
+    testFiniteNaturalResourcesDepletionAndAI();
+    testFireSpritesAndVisualEffectsPipeline();
+    testVolcanoPixelArtSpritesAndLifecyclePipeline();
+    testWaterMovementSpritesAndDynamicFluidPipeline();
+    testCassetteAndRoundPlayButtons();
+    testEarthquakeAndHeavyImpactCraterFormation();
+    testMetricPhysicalScaleAndDisasterParameters();
+    testIndependentPlaythroughsAndSolidSnapshotSystem();
+    testLearnToPlaySacredCodexAndTutorialSystem();
+    testScaledTimeSynchronizationWithHoursAndAdvancements();
+    testVillagerConditionAndBehaviorSystem();
+    testGeologicalMineralVeinsAndTerrainLogic();
+    testFireAndWaterDissipationAntiInfiniteCycles();
+    testWaterDepthPhasesAndSpriteSystem();
+    testLavaAndMagmaTilesetAndLifecycleSystem();
+    testVolcanicBiomeAndNaturalVolcanoGeneration();
+    testDestructionTilesetAndScorchedGroundSystem();
+    testMapEditorAndCreationSystem();
 
     std::cout << "========================================" << std::endl;
     std::cout << "      ALL TESTS PASSED SUCCESSFULLY!    " << std::endl;

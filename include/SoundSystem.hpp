@@ -35,7 +35,8 @@ enum class SFXType {
     FaithGain,       // Campanillas ascendentes de devoción celestial
     EraAscension,    // Cuerno tribal y gong ceremonial al cambiar de era
     CombatAttack,    // Golpe seco de combate cuerpo a cuerpo
-    UnitDeath        // Gemido tenue o exhalación de muerte
+    UnitDeath,       // Gemido tenue o exhalación de muerte
+    AtomicExplosion  // EN: Cataclysmic nuclear detonation & reverberating shockwave / ES: Detonación nuclear cataclísmica y eco de onda
 };
 
 // Estructura de instancia de sonido en reproducción
@@ -110,6 +111,10 @@ public:
     bool isRunning() const { return m_running; }
     bool isHardwareActive() const { return m_hardwareActive; }
     const std::string& getDeviceName() const { return m_deviceName; }
+
+    // EN: Load authentic nuclear explosion WAV audio sample from disk
+    // ES: Cargar muestra de audio WAV auténtica de explosión nuclear desde disco
+    bool loadAtomicBombAudio(const std::string& filePath);
 
 private:
     // Hilo de renderizado de audio
@@ -200,6 +205,11 @@ private:
 
     // Cola de efectos de sonido activos
     std::vector<ActiveSFXInstance> m_activeSFX;
+
+    // EN: Preloaded PCM audio samples for authentic atomic bomb explosion
+    // ES: Muestras de audio PCM precargadas para la explosión atómica auténtica
+    std::vector<float> m_atomicBombSamplesL;
+    std::vector<float> m_atomicBombSamplesR;
 };
 
 } // namespace ReligionSim

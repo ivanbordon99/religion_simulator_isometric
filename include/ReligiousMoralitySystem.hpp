@@ -195,6 +195,12 @@ public:
     [[nodiscard]] std::string serialize() const;
     void deserialize(const std::string& data);
 
+    // EN: Purge all religious profiles and reset moral records
+    // ES: Purgar todos los perfiles religiosos y reiniciar registros morales
+    void clear() {
+        m_profiles.clear();
+    }
+
 private:
     std::vector<MoralRuleDefinition> m_catalog;
     std::map<int, ReligionMoralProfile> m_profiles;

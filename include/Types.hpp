@@ -75,7 +75,19 @@ enum class GameState : std::uint8_t {
     LoadWorldMenu,
     Playing,
     Options,
-    GameOver
+    GameOver,
+    Tutorial,
+    MapEditor
+};
+
+// EN: Categories / tabs for the "Learn to Play" sacred codex guide
+// ES: Categorías / pestañas para la guía sagrada del códice "Aprende a jugar"
+enum class TutorialTab : std::uint8_t {
+    BasicsAndFaith = 0,
+    ControlsAndCamera,
+    VillagersAndEcology,
+    MiraclesAndEras,
+    Count
 };
 
 enum class HistoricalEra : std::uint8_t {
@@ -193,17 +205,21 @@ enum class ResourceType : std::uint8_t {
     Wood = 2,       // Madera (Bosques, arboledas, combustible y construcción)
     Stone = 3,      // Piedra (Colinas, canteras líticas, templos y herramientas)
     Gold = 4,       // Oro / Minerales (Vetas minerales, ofrendas sagradas y riqueza)
-    Iron = 5        // Hierro (Yacimientos minerales, herramientas avanzadas y forja)
+    Iron = 5,       // Hierro (Yacimientos minerales, herramientas avanzadas y forja)
+    Copper = 6,     // Cobre (Yacimientos de cobre y malaquita, utensilios e ídolos)
+    Diamond = 7     // Diamante (Cristales preciosos, relicarios y devoción divina)
 };
 
 inline const char* getResourceTypeName(ResourceType t) {
     switch (t) {
-        case ResourceType::Food:  return "Comida";
-        case ResourceType::Wood:  return "Madera";
-        case ResourceType::Stone: return "Piedra";
-        case ResourceType::Gold:  return "Oro";
-        case ResourceType::Iron:  return "Hierro";
-        default:                  return "Ninguno";
+        case ResourceType::Food:    return "Comida";
+        case ResourceType::Wood:    return "Madera";
+        case ResourceType::Stone:   return "Piedra";
+        case ResourceType::Gold:    return "Oro";
+        case ResourceType::Iron:    return "Hierro";
+        case ResourceType::Copper:  return "Cobre";
+        case ResourceType::Diamond: return "Diamante";
+        default:                    return "Ninguno";
     }
 }
 
@@ -214,12 +230,16 @@ struct VillageResources {
     int stone{150};
     int gold{50};
     int iron{80};
+    int copper{60};
+    int diamond{15};
 
     int maxFood{5000};
     int maxWood{3000};
     int maxStone{2000};
     int maxGold{1000};
     int maxIron{1500};
+    int maxCopper{1500};
+    int maxDiamond{500};
 
     // Estadísticas y estado de supervivencia
     int totalCollected{0};
@@ -246,6 +266,12 @@ struct VillageResources {
             case ResourceType::Iron:
                 iron = std::min(maxIron, iron + amount);
                 break;
+            case ResourceType::Copper:
+                copper = std::min(maxCopper, copper + amount);
+                break;
+            case ResourceType::Diamond:
+                diamond = std::min(maxDiamond, diamond + amount);
+                break;
             default:
                 break;
         }
@@ -265,12 +291,14 @@ struct VillageResources {
 
     int getAmount(ResourceType t) const {
         switch (t) {
-            case ResourceType::Food:  return food;
-            case ResourceType::Wood:  return wood;
-            case ResourceType::Stone: return stone;
-            case ResourceType::Gold:  return gold;
-            case ResourceType::Iron:  return iron;
-            default:                  return 0;
+            case ResourceType::Food:    return food;
+            case ResourceType::Wood:    return wood;
+            case ResourceType::Stone:   return stone;
+            case ResourceType::Gold:    return gold;
+            case ResourceType::Iron:    return iron;
+            case ResourceType::Copper:  return copper;
+            case ResourceType::Diamond: return diamond;
+            default:                    return 0;
         }
     }
 };
@@ -289,7 +317,12 @@ struct WorldCreationConfig {
     VictoryConditionType victoryCondition{VictoryConditionType::HegemoniaMundial};
 
     // Opciones adicionales del mundo y la partida
-    int mapSizeIndex{1};        // 0: Pequeño (32x32), 1: Mediano (48x48), 2: Grande (64x64)
+    // EN: Map size presets starting from 64x64:
+    //     0: Pequeño (64x64, 320m), 1: Mediano (80x80, 400m), 2: Grande (96x96, 480m),
+    //     3: Enorme (128x128, 640m), 4: Inmenso (160x160, 800m), 5: Colosal (200x200, 1.0km),
+    //     6: Titánico (256x256, 1.28km), 7: Planetario (320x320, 1.6km)
+    // ES: Ajustes de tamaño de mapa iniciando desde 64x64 (Por defecto: Enorme 128x128)
+    int mapSizeIndex{3};        // Default: 3 (Enorme 128x128)
     int disasterFrequency{1};   // 0: Bajas, 1: Normales, 2: Frecuentes
     bool allowSchisms{true};    // Si pueden ocurrir cismas espontáneos en la religión
     bool allowSyncretism{true}; // Si se permite fusión sincretica con otras fes
@@ -299,6 +332,73 @@ struct WorldCreationConfig {
     TimePacing timePacing{TimePacing::Clasico};
     ResourceAbundance resourceAbundance{ResourceAbundance::Equilibrado};
     TribalBelligerence tribalBelligerence{TribalBelligerence::Equilibrada};
+};
+
+// EN: View modes for the liturgical map editor
+// ES: Modos de visualización para el editor litúrgico de mapas
+enum class MapEditorViewMode : std::uint8_t {
+    Cartographic2D = 0, // EN: Macro 2D canvas with procedural controls / ES: Lienzo 2D macro con controles
+    Isometric25D = 1    // EN: Micro 2.5D isometric view with free camera / ES: Vista 2.5D isométrica con cámara libre
+};
+
+// EN: Active sculpting and editing brush types for the liturgical map editor
+// ES: Tipos de pincel activo de escultura y edición para el editor litúrgico de mapas
+enum class MapEditorBrush : std::uint8_t {
+    Inspect = 0,
+    Ocean,
+    ShallowWater,
+    FertileValley,
+    DenseForest,
+    HighlandHills,
+    RuggedMountains,
+    AridDesert,
+    FrozenTundra,
+    VolcanicCaldera,
+    Wood,
+    Stone,
+    Gold,
+    Iron,
+    Copper,
+    Diamond,
+    ClearResource,
+    RaiseElevation,
+    LowerElevation,
+    FlattenElevation,
+    // EN: Direct 16-Tile Atlas terrain sprite brushes
+    // ES: Pinceles directos de los 16 mosaicos del atlas de terreno
+    TileGrass,          // Tile 0: Pasto base
+    TileRock,           // Tile 1: Suelo rocoso / montaña
+    TileTropicalPlains, // Tile 2: Pradera tropical
+    TileFarmland,       // Tile 3: Tierra fértil / labranza
+    TileDeepOceanAlt,   // Tile 4: Océano profundo azul oscuro
+    TileRichForest,     // Tile 5: Pasto húmedo de bosque
+    TileHighlands,      // Tile 6: Pastizal alto / colina
+    TileSwamp,          // Tile 7: Pantano / Ciénaga
+    TileSand,           // Tile 8: Arena del desierto
+    TileSnow,           // Tile 9: Nieve / Tundra glacial
+    TileShallowWater,   // Tile 10: Costa somera
+    TileMidOcean,       // Tile 11: Agua marina
+    TileCaveWater,      // Tile 12: Agua de caverna
+    TileAbyssal,        // Tile 13: Mar abisal profundo
+    TileOpenOcean,      // Tile 14: Mar abierto
+    TileLava,           // Tile 15: Lava / magma ardiente
+    TileAsh,            // Suelo calcinado / ceniza volcánica
+    TileCrater          // Cráter de impacto
+};
+
+// EN: Configuration and dynamic state for the interactive liturgical map editor
+// ES: Configuración y estado dinámico para el editor interactivo litúrgico de mapas
+struct MapEditorConfig {
+    int mapSizeIndex{3}; // Default: 3 (128x128 Enorme)
+    uint32_t mapSeed{1337};
+    WorldClimate worldClimate{WorldClimate::Templado};
+    ResourceAbundance resourceAbundance{ResourceAbundance::Equilibrado};
+    MapEditorBrush activeBrush{MapEditorBrush::FertileValley};
+    int brushRadius{1}; // 1: 1x1, 2: 3x3, 3: 5x5
+    std::string statusMessage{"LISTO PARA ESCULPIR Y PINTAR EL MUNDO"};
+    float statusTimer{0.0f};
+    MapEditorViewMode viewMode{MapEditorViewMode::Cartographic2D};
+    int paletteTab{0}; // 0 = Atlas Terrain Sprites (16), 1 = Resources & Props, 2 = Topography & Brushes
 };
 
 // Core Visual & Design Constants
@@ -324,7 +424,17 @@ enum class BiomeType {
     HighlandHills,
     AridDesert,
     RuggedMountains,
-    FrozenTundra
+    FrozenTundra,
+    VolcanicCaldera
+};
+
+// EN: 4 Progressive water depth phases from shoreline foam line to abyssal deep ocean
+// ES: 4 Fases progresivas de profundidad del agua desde línea de espuma hasta el mar profundo abisal
+enum class WaterDepthPhase : uint8_t {
+    ShorelineFoam = 0,   // EN: Phase 1: Foam Line / Shoreline / ES: Fase 1: Línea de Espuma / Orilla
+    ShallowCoast = 1,    // EN: Phase 2: Shallow Waters / Coast / ES: Fase 2: Aguas Someras / Costa
+    MidOcean = 2,        // EN: Phase 3: Mid Sea / Ocean / ES: Fase 3: Mar Medio / Océano
+    DeepAbyssal = 3      // EN: Phase 4: Deep Sea / Abyssal / ES: Fase 4: Mar Profundo / Abisal
 };
 
 // Backward-compatible alias for existing modules
@@ -474,5 +584,218 @@ enum class RenderMapMode {
 constexpr float BASE_TILE_WIDTH  = 64.0f;
 constexpr float BASE_TILE_HEIGHT = 32.0f;
 constexpr float ELEVATION_STEP   = 8.0f;
+
+// =========================================================================
+// EN: World Metric Physical Scaling System (1 Cell = 5.0 Meters)
+// ES: Sistema Físico de Escala Métrica Mundial (1 Celda = 5.0 Metros)
+// =========================================================================
+
+// EN: Physical length of one map cell edge in meters (5.0 meters / cell)
+// ES: Longitud física de la arista de una celda de mapa en metros (5.0 metros / celda)
+constexpr float METERS_PER_CELL = 5.0f;
+
+// EN: Number of map cells per linear meter (0.20 cells / meter)
+// ES: Número de celdas de mapa por metro lineal (0.20 celdas / metro)
+constexpr float CELLS_PER_METER = 0.20f;
+
+// EN: Real-world kilometers per map cell (0.005 km / cell)
+// ES: Kilómetros del mundo real por celda del mapa (0.005 km / celda)
+constexpr float KM_PER_CELL = 0.005f;
+
+// EN: Number of map cells per linear kilometer (200.0 cells / km)
+// ES: Número de celdas de mapa por kilómetro lineal (200.0 celdas / km)
+constexpr float CELLS_PER_KM = 200.0f;
+
+// EN: Speed of sound in dry air at 20°C in meters per second (343.0 m/s)
+// ES: Velocidad del sonido en aire seco a 20°C en metros por segundo (343.0 m/s)
+constexpr float SPEED_OF_SOUND_MPS = 343.0f;
+
+// EN: Acoustic speed of sound in map cells per second (68.6 cells / second)
+// ES: Velocidad acústica del sonido en celdas de mapa por segundo (68.6 celdas / segundo)
+constexpr float SPEED_OF_SOUND_CELLS_PER_SEC = SPEED_OF_SOUND_MPS * CELLS_PER_METER;
+
+// EN: Convert physical meters to map cell units
+// ES: Convertir metros físicos a unidades de celdas del mapa
+constexpr float metersToCells(float meters) noexcept {
+    return meters * CELLS_PER_METER;
+}
+
+// EN: Convert map cell units to physical meters
+// ES: Convertir unidades de celdas del mapa a metros físicos
+constexpr float cellsToMeters(float cellUnits) noexcept {
+    return cellUnits * METERS_PER_CELL;
+}
+
+// EN: Convert kilometers to map cell units
+// ES: Convertir kilómetros a unidades de celdas del mapa
+constexpr float kmToCells(float kilometers) noexcept {
+    return kilometers * CELLS_PER_KM;
+}
+
+// EN: Convert map cell units to kilometers
+// ES: Convertir unidades de celdas del mapa a kilómetros
+constexpr float cellsToKm(float cellUnits) noexcept {
+    return cellUnits * KM_PER_CELL;
+}
+
+// =========================================================================
+// EN: Physical Scaling Specifications for Little Boy (15 kt TNT Airburst)
+// ES: Especificaciones de Escala Física para Little Boy (15 kt TNT Detonación Aérea)
+// =========================================================================
+namespace LittleBoyScale {
+    // EN: Nuclear yield in equivalent kilotons of TNT (15.0 kt)
+    // ES: Potencia nuclear en kilotones equivalentes de TNT (15.0 kt)
+    constexpr float YIELD_KILOTONS_TNT = 15.0f;
+
+    // EN: Maximum thermal vaporization fireball radius: 180 meters (36.0 cells)
+    // Instantaneous vaporization of living tissue, water boiling, vitrified trinitite bedrock
+    // ES: Radio máximo de bola de fuego y vaporización térmica: 180 metros (36.0 celdas)
+    // Vaporización instantánea de tejido vivo, ebullición de agua, lecho vitrificado de trinitita
+    constexpr float FIREBALL_RADIUS_METERS = 180.0f;
+    constexpr float FIREBALL_RADIUS_CELLS = FIREBALL_RADIUS_METERS * CELLS_PER_METER;
+
+    // EN: Heavy overpressure blast zone (>= 20 psi / 140 kPa): 500 meters (100.0 cells)
+    // Complete demolition of wooden and masonry buildings, 100% trees uprooted and sheared
+    // ES: Zona de sobrepresión severa (>= 20 psi / 140 kPa): 500 metros (100.0 celdas)
+    // Demolición total de edificios de madera y piedra, 100% de árboles arrancados
+    constexpr float HEAVY_OVERPRESSURE_RADIUS_METERS = 500.0f;
+    constexpr float HEAVY_OVERPRESSURE_RADIUS_CELLS = HEAVY_OVERPRESSURE_RADIUS_METERS * CELLS_PER_METER;
+
+    // EN: Moderate overpressure blast zone (>= 5 psi / 35 kPa): 1600 meters (320.0 cells)
+    // Widespread residential collapse, roofs torn off, widespread burns
+    // ES: Zona de sobrepresión moderada (>= 5 psi / 35 kPa): 1600 metros (320.0 celdas)
+    // Colapso generalizado de viviendas, techos arrancados, quemaduras generalizadas
+    constexpr float MODERATE_OVERPRESSURE_RADIUS_METERS = 1600.0f;
+    constexpr float MODERATE_OVERPRESSURE_RADIUS_CELLS = MODERATE_OVERPRESSURE_RADIUS_METERS * CELLS_PER_METER;
+
+    // EN: Light overpressure blast zone (>= 1 psi / 7 kPa): 3500 meters (700.0 cells)
+    // Shattered windows, superficial structural damage, panic shockwave
+    // ES: Zona de sobrepresión ligera (>= 1 psi / 7 kPa): 3500 metros (700.0 celdas)
+    // Cristales rotos, daños estructurales superficiales, pánico por onda expansiva
+    constexpr float LIGHT_OVERPRESSURE_RADIUS_METERS = 3500.0f;
+    constexpr float LIGHT_OVERPRESSURE_RADIUS_CELLS = LIGHT_OVERPRESSURE_RADIUS_METERS * CELLS_PER_METER;
+
+    // EN: Supersonic Mach shock front expansion speed across terrain (~50 cells/s)
+    // ES: Velocidad de expansión del frente de choque Mach en terreno (~50 celdas/s)
+    constexpr float SHOCKWAVE_SPEED_CELLS_PER_SEC = 50.0f;
+}
+
+// =========================================================================
+// EN: Physical Scaling Specifications for Average Meteorite Impact
+// ES: Especificaciones de Escala Física para Impacto de Meteorito Promedio
+// Typical 1.5 - 2.5 m stony/iron bolide surviving atmospheric deceleration
+// =========================================================================
+namespace AverageMeteoriteScale {
+    // EN: Bolide diameter before ground excavation: ~2.0 meters (0.4 cells)
+    // ES: Diámetro del bólido antes de la excavación: ~2.0 metros (0.4 celdas)
+    constexpr float BOLIDE_DIAMETER_METERS = 2.0f;
+    constexpr float BOLIDE_DIAMETER_CELLS = BOLIDE_DIAMETER_METERS * CELLS_PER_METER;
+
+    // EN: Impact crater diameter: 16.5 meters (~3.3 cells), radius 1.65 cells (~8.25 m)
+    // Simple bowl-shaped depression characteristic of small terrestrial hypervelocity craters
+    // ES: Diámetro del cráter de impacto: 16.5 metros (~3.3 celdas), radio 1.65 celdas (~8.25 m)
+    // Depresión simple en cuenca característica de cráteres hiperveloces terrestres pequeños
+    constexpr float CRATER_DIAMETER_METERS = 16.5f;
+    constexpr float CRATER_RADIUS_CELLS = (CRATER_DIAMETER_METERS * 0.5f) * CELLS_PER_METER;
+    constexpr float CRATER_DEPTH_METERS = 4.0f;
+    constexpr float CRATER_DEPTH_ELEVATION = 0.80f;
+    constexpr float CRATER_RIM_ELEVATION_UPLIFT = 0.25f;
+
+    // EN: Continuous ejecta blanket apron radius: 32.5 meters (6.5 cells)
+    // Deposits overturned rock flaps, impact breccia, and ballistic ejecta boulders
+    // ES: Radio del manto continuo de eyección: 32.5 metros (6.5 celdas)
+    // Deposita solapas de roca invertidas, brecha de impacto y bloques balísticos eyectados
+    constexpr float EJECTA_RADIUS_METERS = 32.5f;
+    constexpr float EJECTA_RADIUS_CELLS = EJECTA_RADIUS_METERS * CELLS_PER_METER;
+
+    // EN: Kinetic airblast and thermal pulse radius: 50.0 meters (10.0 cells)
+    // Severe overpressure topples trees and causes blast casualties up to 50 meters
+    // ES: Radio de onda aérea cinética y pulso térmico: 50.0 metros (10.0 celdas)
+    // Sobrepresión severa derriba árboles y provoca bajas por onda hasta 50 metros
+    constexpr float AIRBLAST_RADIUS_METERS = 50.0f;
+    constexpr float AIRBLAST_RADIUS_CELLS = AIRBLAST_RADIUS_METERS * CELLS_PER_METER;
+}
+
+// =========================================================================
+// EN: Physical Constants for Fall Damage and Natural Phenomena
+// ES: Constantes Físicas para Daño por Caída y Fenómenos Naturales
+// =========================================================================
+
+// EN: Safe vertical impact velocity threshold below which no fall damage occurs (units/s)
+// ES: Umbral de velocidad de impacto vertical seguro por debajo del cual no hay daño por caída (unidades/s)
+constexpr float SAFE_FALL_IMPACT_VELOCITY = 13.5f;
+
+// EN: Base damage coefficient per unit of excess impact velocity above safe threshold
+// ES: Coeficiente base de daño por unidad de exceso de velocidad de impacto por encima del umbral seguro
+constexpr float FALL_DAMAGE_VELOCITY_COEFFICIENT = 1.85f;
+
+// EN: Quadratic severity factor for high-speed terminal impacts
+// ES: Factor cuadrático de severidad para impactos a velocidad terminal
+constexpr float FALL_DAMAGE_SEVERITY_SCALE = 30.0f;
+
+// EN: Water hydrodynamic kinetic impact dampening factor (75% shock absorption)
+// ES: Factor de amortiguación hidrodinámica del agua (75% de absorción de choque)
+constexpr float WATER_FALL_DAMPING_FACTOR = 0.25f;
+
+// EN: Rocky mountain / basalt terrain damage multiplier (+30% impact trauma)
+// ES: Multiplicador de daño para terreno rocoso / basalto (+30% de trauma por impacto)
+constexpr float ROCKY_TERRAIN_DAMAGE_MULTIPLIER = 1.30f;
+
+// EN: Soft grass / loam terrain damage multiplier (-15% cushioning)
+// ES: Multiplicador de daño para pasto / tierra fértil blanda (-15% de amortiguación)
+constexpr float SOFT_TERRAIN_DAMAGE_MULTIPLIER = 0.85f;
+
+// EN: Minimum vertical elevation difference between cells to trigger cliff falling
+// ES: Desnivel vertical mínimo entre celdas para desencadenar caída por despeñamiento
+constexpr float CLIFF_FALL_ELEVATION_THRESHOLD = 0.40f;
+
+// EN: Gravitational acceleration in continuous vertical units per second squared
+// ES: Aceleración de la gravedad en unidades verticales continuas por segundo al cuadrado
+constexpr float GRAVITY_ACCELERATION_UNITS_S2 = 55.0f;
+
+// EN: Static friction coefficient between human soles and natural terrain for balance
+// ES: Coeficiente de fricción estática entre calzado/pies humanos y terreno para equilibrio
+constexpr float HUMAN_GROUND_STATIC_FRICTION = 0.62f;
+
+// =========================================================================
+// EN: Movable Elements & Physical Debris Entities
+// ES: Elementos Movibles y Entidades de Escombros Físicos
+// =========================================================================
+
+// EN: Types of movable physical debris ejected by cataclysms and disasters
+// ES: Tipos de escombros físicos movibles expulsados por cataclismos y desastres
+enum class DebrisType : uint8_t {
+    UprootedTreeTrunk = 0, // EN: Tree trunk uprooted by tornado or seismic blast / ES: Tronco de árbol arrancado por tornado o sismo
+    RoofThatch = 1,        // EN: Thatch roof / wooden beam torn from collapsed house / ES: Techo de paja / viga de madera arrancada de casa
+    HouseRubble = 2,       // EN: Stone masonry rubble from destroyed dwelling / ES: Escombros y piedras de vivienda destruida
+    PyroclasticBomb = 3,   // EN: Volcanic ballistic bomb ejected by eruption / ES: Bomba piroclástica expulsada por volcán
+    ResourceCrate = 4,     // EN: Supply crate or cargo chest launched by explosion/wave / ES: Fardo de provisiones o cofre sagrado empujado por viento/ola
+    SoilChunk = 5,         // EN: Scorched earth / soil chunk excavated by blast / ES: Terrón de tierra / suelo chamuscado excavado por explosión
+    RockDebris = 6,        // EN: Jagged bedrock fragment / stone boulder hurled by shockwave / ES: Fragmento de lecho rocoso / peñasco lanzado por la onda
+    IncandescentSlag = 7,  // EN: Superheated molten trinitite / incandescent slag ejecta / ES: Escoria incandescente / trinitita fundida supercalentada
+    WaterSprayGeyser = 8   // EN: Atomized water plume / geyser column ejected into air / ES: Pluma de agua atomizada / columna de géiser eyectada al aire
+};
+
+// EN: Movable physical debris entity governed by 2.5D ballistic and aerodynamic physics
+// ES: Entidad física movible gobernada por física balística y aerodinámica 2.5D
+struct PhysicalDebris {
+    DebrisType type{DebrisType::UprootedTreeTrunk};
+    float worldX{0.0f};
+    float worldY{0.0f};
+    float altitude{0.0f};
+    float velocityX{0.0f};
+    float velocityY{0.0f};
+    float velocityZ{0.0f};
+    float rotationAngle{0.0f};
+    float angularVelocity{0.0f};
+    float mass{15.0f};         // Masa en kg (afecta inercia e impacto)
+    float damageRadius{1.4f};
+    float impactDamage{25.0f};
+    float lifeTimer{0.0f};
+    float maxLifetime{14.0f};
+    bool settled{false};
+    bool isFloating{false};
+    int bounces{0};
+};
 
 } // namespace ReligionSim

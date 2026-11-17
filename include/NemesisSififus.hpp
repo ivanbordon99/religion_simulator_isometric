@@ -131,6 +131,14 @@ public:
     [[nodiscard]] std::vector<NemesisProfile>& getDenseProfiles() noexcept { return m_profiles; }
     [[nodiscard]] const std::vector<NemesisProfile>& getDenseProfiles() const noexcept { return m_profiles; }
 
+    // EN: Clear all notable units and reset sparse-dense indexing
+    // ES: Limpiar todas las unidades notables y reiniciar el índice disperso-denso
+    void clear() noexcept {
+        std::fill(m_sparse.begin(), m_sparse.end(), INVALID_INDEX);
+        m_dense.clear();
+        m_profiles.clear();
+    }
+
 private:
     void evictLeastSignificantNotable();
 
@@ -210,6 +218,14 @@ public:
     [[nodiscard]] const std::vector<MythRecord>& getActiveMyths() const noexcept { return m_activeMyths; }
     void setEventLine(EventLine* el) { m_eventLine = el; }
 
+    // EN: Clear active myths and ethos cache
+    // ES: Limpiar mitos activos y caché de ethos
+    void clear() noexcept {
+        m_activeMyths.clear();
+        m_collectiveEthos.clear();
+        m_nextMythId = 1;
+    }
+
 private:
     void evictFadedMyth();
     void recomputeCollectiveEthos();
@@ -254,6 +270,14 @@ public:
     // Consulta de epíteto o estado notable
     const char* getNotableEpithetOrNull(int32_t entityId) const;
     const Nemesis::NemesisProfile* getProfileOrNull(int32_t entityId) const;
+
+    // EN: Clear all nemesis profiles and cultural myth systems
+    // ES: Limpiar todos los perfiles de némesis y sistemas de mitos culturales
+    void clear() noexcept {
+        m_pool.clear();
+        m_sififus.clear();
+        m_nextMythId = 1;
+    }
 
 private:
     Nemesis::NotableUnitsPool m_pool;

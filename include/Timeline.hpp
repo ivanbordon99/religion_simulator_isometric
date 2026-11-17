@@ -7,6 +7,8 @@
 
 namespace ReligionSim {
 
+class DayNightCycle;
+
 struct HistorySnapshot {
     int year{-4000};
     int totalWorldPop{0};
@@ -19,6 +21,21 @@ public:
     Timeline(int startYear = -4000, int endYear = 2200);
 
     void update(float deltaTime, float& outDtYears);
+
+    // EN: Synchronize timeline with in-game DayNightCycle 24h hours and applied advancements
+    // ES: Sincronizar línea temporal con las horas de DayNightCycle y los avances aplicados
+    void updateSynchronized(float deltaTime, const DayNightCycle& dayNight, float& outDtYears);
+
+    // EN: Apply historical momentum from convalidating theological doctrines or capstones
+    // ES: Aplicar impulso histórico por convalidar doctrinas teológicas o hitos de era
+    void applyAdvancementHistoricalLeap(int leapYears, float& outDtYears);
+
+    // EN: Get sub-year fraction (0.0 to 1.0) strictly corresponding to the 24-hour cycle
+    // ES: Obtener fracción sub-anual (0.0 a 1.0) correspondiente estrictamente al ciclo de 24 horas
+    float getYearFraction() const { return m_yearFraction; }
+
+    int getAdvancementBonusYears() const { return m_advancementBonusYears; }
+    void setAdvancementBonusYears(int bonusYears) { m_advancementBonusYears = bonusYears; }
 
     int getCurrentYear() const { return m_currentYear; }
     void setCurrentYear(int year) { m_currentYear = year; }
@@ -53,9 +70,14 @@ public:
         m_startYear = startYear;
         m_endYear = endYear;
         m_currentYear = startYear;
+        m_yearFraction = 0.0f;
+        m_advancementBonusYears = 0;
+        m_lastDaySeen = 0;
+        m_lastHourSeen = 0.0f;
         m_history.clear();
         m_isPaused = false;
         m_speedMultiplier = 1;
+        m_tickAccumulator = 0.0f;
     }
 
     static std::string formatYear(int year);
@@ -64,6 +86,11 @@ private:
     int m_startYear{-4000};
     int m_endYear{2200};
     int m_currentYear{-4000};
+
+    float m_yearFraction{0.0f};
+    int m_advancementBonusYears{0};
+    int m_lastDaySeen{0};
+    float m_lastHourSeen{0.0f};
 
     bool m_isPaused{false};
     int m_speedMultiplier{1}; // 1x, 2x, 5x, 10x

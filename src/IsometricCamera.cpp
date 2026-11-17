@@ -101,8 +101,8 @@ void IsometricCamera::centerOnCell(int gridX, int gridY, int mapWidth, int mapHe
     float isoX = (static_cast<float>(gridX) - static_cast<float>(gridY)) * halfW;
     float isoY = (static_cast<float>(gridX) + static_cast<float>(gridY)) * halfH;
 
-    m_targetCameraX = static_cast<float>(m_screenWidth) * 0.5f - isoX * m_zoom;
-    m_targetCameraY = static_cast<float>(m_screenHeight) * 0.5f - isoY * m_zoom;
+    m_targetCameraX = static_cast<float>(m_screenWidth) * 0.5f - isoX * m_targetZoom;
+    m_targetCameraY = static_cast<float>(m_screenHeight) * 0.5f - isoY * m_targetZoom;
 }
 
 void IsometricCamera::reset(int mapWidth, int mapHeight) {

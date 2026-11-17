@@ -50,6 +50,15 @@ public:
     float getAngle() const { return m_angle; }
     int getBounceCount() const { return m_bounceCount; }
 
+    // EN: Return and clear the impact velocity of the most recent ground collision
+    // ES: Obtener y limpiar la velocidad de impacto del choque contra el suelo más reciente
+    float consumeLastImpactVelocity() {
+        const float impactSpeed = m_lastImpactVelocity;
+        m_lastImpactVelocity = 0.0f;
+        return impactSpeed;
+    }
+    float getLastImpactVelocity() const { return m_lastImpactVelocity; }
+
 private:
     bool m_active{false};
     bool m_settled{false};
@@ -58,6 +67,7 @@ private:
     float m_angle{0.0f};            // Ángulo de rotación del cuerpo principal (radianes)
     float m_angularVelocity{0.0f};  // Velocidad de giro / voltereta
     int m_bounceCount{0};           // Contador de rebotes en el suelo
+    float m_lastImpactVelocity{0.0f}; // Velocidad de impacto contra el suelo registrada
 
     // Físicas de articulaciones (extremidades colgantes y sacudidas)
     RagdollLimbJoint m_armL;

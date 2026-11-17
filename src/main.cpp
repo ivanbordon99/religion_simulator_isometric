@@ -10,6 +10,7 @@ int main(int argc, char** argv) {
     std::cout << "==========================================================" << std::endl;
 
     bool headless = false;
+    bool luminus = false;
     int ticks = 180;
     std::string exportFile = "simulation_snapshot.ppm";
 
@@ -17,6 +18,8 @@ int main(int argc, char** argv) {
         std::string arg = argv[i];
         if (arg == "--headless") {
             headless = true;
+        } else if (arg == "--luminus") {
+            luminus = true;
         } else if (arg == "--ticks" && i + 1 < argc) {
             ticks = std::atoi(argv[++i]);
         } else if (arg == "--export" && i + 1 < argc) {
@@ -25,6 +28,7 @@ int main(int argc, char** argv) {
             std::cout << "Marangatu: The Faith Simulator (Pre-Alpha v0.4.0)\n"
                       << "Usage: ./bin/religion_sim [options]\n"
                       << "  --headless              Run simulation without opening an X11 window\n"
+                      << "  --luminus               Reveal full map without fog of war\n"
                       << "  --ticks <N>             Number of simulation ticks to run (default: 180)\n"
                       << "  --export <file.ppm>     Export map snapshot to PPM image\n"
                       << "  --help                  Show this help text\n";
@@ -48,7 +52,7 @@ int main(int argc, char** argv) {
     }
 
     if (headless) {
-        game.runHeadless(ticks, exportFile);
+        game.runHeadless(ticks, exportFile, luminus);
     } else {
         std::cout << "[Simulator] Controls:\n"
                   << "  - Left Click: Select cell / Click UI buttons / Scrub timeline\n"

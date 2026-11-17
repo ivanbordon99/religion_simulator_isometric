@@ -38,7 +38,7 @@ ColorRGB interpolateKeyframes(const std::vector<ColorKeyframe>& keys, float hour
 } // anonymous namespace
 
 DayNightCycle::DayNightCycle(float dayDurationSeconds, float initialHour)
-    : m_dayDuration(dayDurationSeconds > 1.0f ? dayDurationSeconds : 90.0f) {
+    : m_dayDuration(dayDurationSeconds > 1.0f ? dayDurationSeconds : 72.0f) {
     setTimeByHour(initialHour);
 }
 
@@ -50,8 +50,14 @@ void DayNightCycle::update(float dt) {
 
     m_timer += dt;
     m_timeOfDay += dt / m_dayDuration;
-    while (m_timeOfDay >= 1.0f) m_timeOfDay -= 1.0f;
-    while (m_timeOfDay < 0.0f) m_timeOfDay += 1.0f;
+    while (m_timeOfDay >= 1.0f) {
+        m_timeOfDay -= 1.0f;
+        m_daysPassed++;
+    }
+    while (m_timeOfDay < 0.0f) {
+        m_timeOfDay += 1.0f;
+        if (m_daysPassed > 0) m_daysPassed--;
+    }
 }
 
 void DayNightCycle::setTimeOfDay(float t) {
@@ -92,6 +98,26 @@ std::string DayNightCycle::getPhaseName() const {
         case DayPhase::Night:     return "Noche";
     }
     return "Día";
+}
+
+// EN: Determine liturgical season of the year from the 24-hour cycle
+// ES: Determinar la estación litúrgica del año a partir del ciclo de 24 horas
+LiturgicalSeason DayNightCycle::getSeason() const {
+    const float currentHour = getHour();
+    if (currentHour < 6.0f) return LiturgicalSeason::Winter;
+    if (currentHour < 12.0f) return LiturgicalSeason::Spring;
+    if (currentHour < 18.0f) return LiturgicalSeason::Summer;
+    return LiturgicalSeason::Autumn;
+}
+
+std::string DayNightCycle::getSeasonName() const {
+    switch (getSeason()) {
+        case LiturgicalSeason::Winter: return "Invierno";
+        case LiturgicalSeason::Spring: return "Primavera";
+        case LiturgicalSeason::Summer: return "Verano";
+        case LiturgicalSeason::Autumn: return "Otoño";
+    }
+    return "Primavera";
 }
 
 std::string DayNightCycle::getTimeFormatted() const {

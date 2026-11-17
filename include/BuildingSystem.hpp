@@ -140,8 +140,18 @@ public:
     [[nodiscard]] const std::vector<House>& getHouses() const { return m_houses; }
     [[nodiscard]] std::vector<House>& getHouses() { return m_houses; }
 
+    // EN: Directly register an externally restored or deserialized house structure
+    // ES: Registrar directamente una estructura de vivienda restaurada externamente o deserializada
+    void addHouseDirect(const House& house);
+
     void evictResident(int humanId);
     void destroyHouse(int id, WorldMap& map, GestorHumanos* humanos = nullptr);
+
+    // EN: Apply physical damage to house structure, triggering collapse into ruins when depleted
+    // ES: Aplicar daño físico a la estructura de la vivienda, provocando colapso en ruinas al agotarse
+    bool damageHouse(int houseId, float damageAmount, WorldMap& mapRef, GestorHumanos* villagerManager = nullptr);
+    bool damageHouseAt(int cellX, int cellY, float damageAmount, WorldMap& mapRef, GestorHumanos* villagerManager = nullptr);
+
     void clear();
 
     [[nodiscard]] int getTotalHouseCount() const { return static_cast<int>(m_houses.size()); }

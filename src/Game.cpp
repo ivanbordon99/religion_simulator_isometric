@@ -6,6 +6,7 @@
 #include <map>
 #include <cctype>
 #include <ctime>
+#include <random>
 
 #if defined(_WIN32)
 #define HAS_WIN32 1
@@ -19,6 +20,9 @@
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 #include <X11/keysym.h>
+#ifdef None
+#undef None
+#endif
 #endif
 
 #ifdef HAS_WIN32
@@ -94,6 +98,8 @@ LRESULT CALLBACK MainWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
         case WM_KEYDOWN: {
             if (wParam == VK_ESCAPE) {
                 g_win32GameInstance->onKeyPress(27);
+            } else if (wParam == VK_F11) {
+                g_win32GameInstance->onKeyPress(1011);
             } else if (wParam == VK_RETURN) {
                 g_win32GameInstance->onKeyPress(13);
             } else if (wParam == VK_BACK) {
@@ -153,14 +159,32 @@ bool Game::init() {
     g_win32GameInstance = this;
 #endif
     // Generar una semilla aleatoria por defecto para el primer arranque en la ventana de creación
-    m_creationConfig.mapSeed = static_cast<uint32_t>(std::time(nullptr)) ^ 0xA5A5A5A5;
+    m_creationConfig.mapSeed = generateUniqueSeed();
 
     // Inicializar sistema de sonido y música de la placa de sonido
     m_soundSystem.init();
 
+    // EN: Load persisted user preferences and synchronize subsystems
+    // ES: Cargar preferencias de usuario persistidas y sincronizar subsistemas
+    loadSettings();
+    applySettings(m_settings);
+
+    // EN: Setup living simulated world panorama for the Minecraft-inspired main menu
+    // ES: Configurar panorama de mundo simulado vivo para la pantalla principal inspirada en Minecraft
+    setupMenuPanoramaWorld();
+
     // Try initializing window (X11 / Win32 / OpenGL)
-    bool windowOk = m_renderer.initWindow("Marangatu: The Faith Simulator [Pre-Alpha v0.4.0]");
+    const bool shouldStartFullscreen = (m_settings.displayMode == DisplayMode::BorderlessFullscreen);
+    bool windowOk = m_renderer.initWindow("Marangatu: The Faith Simulator [Pre-Alpha v0.4.0]", shouldStartFullscreen);
     if (windowOk) {
+        // EN: Synchronize window viewport and camera dimensions with fullscreen status
+        // ES: Sincronizar dimensiones del viewport y cámara con el estado de pantalla completa
+        if (shouldStartFullscreen) {
+            m_renderer.setFullscreen(true);
+            m_windowWidth = m_renderer.getWidth();
+            m_windowHeight = m_renderer.getHeight();
+            m_camera.setScreenSize(m_windowWidth, m_windowHeight);
+        }
 #if HAS_X11
         std::cout << "[Simulator] X11/OpenGL Display initialized successfully." << std::endl;
 #elif defined(HAS_WIN32)
@@ -177,6 +201,54 @@ bool Game::init() {
 
 void Game::update(float deltaTime) {
     m_renderer.update(deltaTime);
+
+    if (m_gameState == GameState::MainMenu ||
+        m_gameState == GameState::WorldCreation ||
+        m_gameState == GameState::LoadWorldMenu ||
+        m_gameState == GameState::Options ||
+        m_gameState == GameState::Tutorial) {
+
+        // EN: Update cinematic panoramic camera drift inspired by Minecraft title screen
+        // ES: Actualizar desplazamiento cinemático panorámico de cámara inspirado en la pantalla de inicio de Minecraft
+        m_menuPanoramaTime += deltaTime;
+        const float panVelocityX = std::cos(m_menuPanoramaTime * 0.08f) * 14.0f * deltaTime;
+        const float panVelocityY = std::sin(m_menuPanoramaTime * 0.05f) * 8.0f * deltaTime;
+        m_camera.pan(panVelocityX, panVelocityY);
+        m_camera.update(deltaTime);
+
+        // EN: Advance living simulated world in menu background (units, circadian cycle, clouds)
+        // ES: Avanzar mundo simulado vivo en el fondo del menú (unidades, ciclo circadiano, nubes)
+        m_dayNightCycle.update(deltaTime * 0.25f);
+        m_cloudSystem.update(deltaTime * 0.20f);
+        m_gestorHumanos.actualizar(deltaTime * 0.70f, m_map, &m_eventLine, m_timeline.getCurrentYear(),
+                                   &m_registry, &m_soundSystem, &m_camera, nullptr, nullptr,
+                                   &m_dayNightCycle, &m_buildingSystem);
+
+        m_soundSystem.update(deltaTime, m_map, m_camera, &m_dayNightCycle, nullptr,
+                             m_gestorHumanos, false, 1.0f, m_timeline.getCurrentYear());
+        return;
+    }
+
+    if (m_gameState == GameState::MapEditor) {
+        if (m_mapEditorConfig.viewMode == MapEditorViewMode::Isometric25D) {
+            m_camera.update(deltaTime);
+        }
+        if (m_mapEditorConfig.statusTimer > 0.0f) {
+            m_mapEditorConfig.statusTimer -= deltaTime;
+            if (m_mapEditorConfig.statusTimer <= 0.0f) {
+                m_mapEditorConfig.statusMessage = "LISTO PARA ESCULPIR Y PINTAR EL MUNDO";
+            }
+        }
+        m_soundSystem.setSimulationTimeState(true, 0.0f, m_timeline.getCurrentYear());
+        return;
+    }
+
+    if (m_gameState == GameState::GameOver) {
+        if (m_isSpectatingPostDefeat) {
+            m_camera.update(deltaTime);
+        }
+        return;
+    }
 
     if (m_gameState != GameState::Playing) {
         m_soundSystem.setSimulationTimeState(true, 0.0f, m_timeline.getCurrentYear());
@@ -195,21 +267,27 @@ void Game::update(float deltaTime) {
         }
     }
 
-    // 1. Sincronizar simulación y paso del tiempo con el movimiento de los sprites
-    float dtYears = 0.0f;
-    m_timeline.update(deltaTime, dtYears);
-    m_timeEngine.setYear(static_cast<double>(m_timeline.getCurrentYear()));
-
+    // EN: 1. Synchronize solar day/night cycle, hour counter and timeline progression with sprites
+    // ES: 1. Sincronizar ciclo solar día/noche, contador de horas y línea temporal con sprites
     bool isPaused = m_timeline.isPaused();
     float speedMult = isPaused ? 0.0f : static_cast<float>(m_timeline.getSpeedMultiplier());
-    int currentYear = m_timeline.getCurrentYear();
     float spriteDt = deltaTime * speedMult;
+
+    // EN: Update solar 24-hour cycle (hours pass contemplatively according to speed multiplier)
+    // ES: Actualizar ciclo solar de 24 horas (las horas pasan contemplativamente según el multiplicador)
+    m_dayNightCycle.setPaused(isPaused);
+    m_dayNightCycle.update(spriteDt);
+
+    // EN: Synchronize timeline strictly with completed days and hour progress
+    // ES: Sincronizar la línea de tiempo estrictamente con los días completados y el avance de horas
+    float dtYears = 0.0f;
+    m_timeline.updateSynchronized(deltaTime, m_dayNightCycle, dtYears);
+    int currentYear = m_timeline.getCurrentYear();
+    m_timeEngine.setYear(static_cast<double>(currentYear));
 
     // Actualizar paisaje sonoro ambiental y música adaptativa sincronizados exactamente con el tiempo de la simulación
     m_soundSystem.update(deltaTime, m_map, m_camera, &m_dayNightCycle, &m_divinePowers, m_gestorHumanos, isPaused, speedMult, currentYear);
 
-    m_dayNightCycle.setPaused(isPaused);
-    m_dayNightCycle.update(spriteDt);
     float cloudDt = isPaused ? (deltaTime * 0.35f) : (spriteDt + deltaTime * 0.20f);
     m_cloudSystem.update(cloudDt);
 
@@ -321,10 +399,29 @@ void Game::update(float deltaTime) {
             if (std::fmod(fx.timer, 3.0f) < deltaTime) {
                 m_camera.addScreenShake(1.5f, 0.5f);
             }
+        } else if (fx.type == DivinePowerType::AtomicBomb) {
+            // EN: Supersonic blast wave shakes camera dynamically as it sweeps the world
+            // ES: La onda expansiva supersónica sacude la cámara dinámicamente al barrer el mundo
+            if (fx.timer < 3.2f) {
+                const float waveAlpha = 1.0f - (fx.timer / 3.2f);
+                m_camera.addScreenShake(14.0f * waveAlpha, 0.25f);
+            }
         }
     }
 
-    m_divinePowers.update(deltaTime, m_map, m_gestorHumanos);
+    // EN: Update divine powers, natural disasters, and physical debris simulation
+    // ES: Actualizar poderes divinos, desastres naturales y simulación de escombros físicos
+    m_divinePowers.update(deltaTime, m_map, m_gestorHumanos, &m_buildingSystem, &m_replication);
+
+    // EN: Update thermodynamic fire physics across the entire world (spread, dissipation, and contact burns)
+    // ES: Actualizar física termodinámica del fuego en todo el mundo (expansión, disipación y quemaduras)
+    m_map.updateFirePhysics(deltaTime, &m_buildingSystem, &m_gestorHumanos,
+                            m_cloudSystem.getWindX(), m_cloudSystem.getWindY());
+
+    // EN: Update hydrology, fluid dynamics and water physics (surface runoff, drainage, fire quenching, and absorption)
+    // ES: Actualizar hidrología, dinámica de fluidos y física del agua (escorrentía, drenaje, extinción y absorción)
+    m_map.updateWaterPhysics(deltaTime, &m_buildingSystem, &m_gestorHumanos);
+
     refreshFaithFog();
 
     // 7. Verificación de Condición de Derrota: Extinción Total de la Fe
@@ -363,32 +460,86 @@ void Game::update(float deltaTime) {
 }
 
 void Game::render() {
-    if (m_gameState == GameState::Playing) {
-        m_renderer.setDayNightCycle(&m_dayNightCycle);
-    } else {
-        m_renderer.setDayNightCycle(nullptr);
-    }
+    m_renderer.setDayNightCycle(&m_dayNightCycle);
+    m_renderer.setCloudSystem(&m_cloudSystem);
     m_renderer.beginFrame();
 
     if (m_gameState == GameState::MainMenu) {
+        // EN: Render living simulated world in background of main menu (Minecraft-style panorama)
+        // ES: Renderizar mundo simulado vivo en el fondo del menú principal (panorama estilo Minecraft)
+        m_renderer.setFogOfWar(nullptr);
+        m_renderer.renderWorldBackground(m_map, m_registry, m_replication,
+                                         m_gestorHumanos, m_camera,
+                                         &m_dayNightCycle, &m_cloudSystem);
         m_renderer.renderMainMenu(m_hoveredMenuButtonId);
+    } else if (m_gameState == GameState::Tutorial) {
+        m_renderer.setFogOfWar(nullptr);
+        m_renderer.renderWorldBackground(m_map, m_registry, m_replication,
+                                         m_gestorHumanos, m_camera,
+                                         &m_dayNightCycle, &m_cloudSystem);
+        if (m_settings.vignetteEnabled) {
+            m_renderer.applyCinematicVignette();
+        }
+        m_renderer.renderTutorialMenu(m_currentTutorialTab, m_hoveredMenuButtonId);
     } else if (m_gameState == GameState::WorldCreation) {
+        m_renderer.setFogOfWar(nullptr);
+        m_renderer.renderWorldBackground(m_map, m_registry, m_replication,
+                                         m_gestorHumanos, m_camera,
+                                         &m_dayNightCycle, &m_cloudSystem);
         m_renderer.renderWorldCreationMenu(m_creationConfig, m_hoveredMenuButtonId, m_activeInputField);
     } else if (m_gameState == GameState::LoadWorldMenu) {
+        m_renderer.setFogOfWar(nullptr);
+        m_renderer.renderWorldBackground(m_map, m_registry, m_replication,
+                                         m_gestorHumanos, m_camera,
+                                         &m_dayNightCycle, &m_cloudSystem);
         m_renderer.renderLoadWorldMenu(m_hoveredMenuButtonId, m_selectedSaveIndex);
     } else if (m_gameState == GameState::Options) {
-        m_renderer.renderOptionsMenu(m_hoveredMenuButtonId);
+        m_renderer.setFogOfWar(nullptr);
+        m_renderer.renderWorldBackground(m_map, m_registry, m_replication,
+                                         m_gestorHumanos, m_camera,
+                                         &m_dayNightCycle, &m_cloudSystem);
+        if (m_settings.vignetteEnabled) {
+            m_renderer.applyCinematicVignette();
+        }
+        m_renderer.renderOptionsMenu(m_settings, m_currentOptionsTab, m_hoveredMenuButtonId);
+    } else if (m_gameState == GameState::MapEditor) {
+        m_renderer.setFogOfWar(nullptr);
+        if (m_mapEditorConfig.viewMode == MapEditorViewMode::Cartographic2D) {
+            const Point2i hoveredEditorCell = m_renderer.screenToMapEditorCell(m_mouseX, m_mouseY, m_editorMap);
+            m_renderer.renderMapEditor(m_mapEditorConfig, m_editorMap, m_hoveredMenuButtonId, m_activeInputField, hoveredEditorCell);
+        } else {
+            int hoveredCellGridX = -1;
+            int hoveredCellGridY = -1;
+            m_camera.screenToGrid(m_mouseX, m_mouseY, hoveredCellGridX, hoveredCellGridY);
+            m_renderer.renderMapEditorIsometric(m_mapEditorConfig, m_editorMap, m_camera, m_hoveredMenuButtonId,
+                                                Point2i{hoveredCellGridX, hoveredCellGridY},
+                                                m_registry, m_replication, m_gestorHumanos);
+        }
     } else if (m_gameState == GameState::GameOver) {
-        m_renderer.setFogOfWar(&m_fog);
-        int hoverGx = -1, hoverGy = -1;
-        m_camera.screenToGrid(m_mouseX, m_mouseY, hoverGx, hoverGy);
-        m_renderer.render(m_map, m_registry, m_timeline, m_eventLine,
-                          m_replication, m_gestorHumanos, m_camera, m_selectedCell, m_mapMode,
-                          m_creationConfig, &m_advancement, &m_divinePowers, {hoverGx, hoverGy},
-                          &m_dayNightCycle, &m_cloudSystem);
-        const Religion* pRel = m_registry.getReligion(resolvePlayerReligionId());
-        int eraIdx = pRel ? static_cast<int>(pRel->currentEra) : 0;
-        m_renderer.renderGameOver(m_creationConfig, m_extinctionYear, eraIdx, m_hoveredMenuButtonId);
+        if (m_isSpectatingPostDefeat) {
+            // EN: In spectator mode, lift fog if reveal is enabled and render pure world without gameplay HUD
+            // ES: En modo espectador, levantar niebla si está habilitado y renderizar mundo puro sin HUD de juego
+            m_renderer.setFogOfWar(m_spectatorRevealAll ? nullptr : &m_fog);
+            m_renderer.renderWorldBackground(m_map, m_registry, m_replication,
+                                             m_gestorHumanos, m_camera,
+                                             &m_dayNightCycle, &m_cloudSystem);
+            int hoverGx = -1, hoverGy = -1;
+            m_camera.screenToGrid(m_mouseX, m_mouseY, hoverGx, hoverGy);
+            m_renderer.renderPostDefeatSpectatorHUD(m_creationConfig, m_extinctionYear,
+                                                   Point2i{hoverGx, hoverGy}, m_map,
+                                                   m_camera, m_spectatorRevealAll, m_hoveredMenuButtonId);
+        } else {
+            m_renderer.setFogOfWar(&m_fog);
+            int hoverGx = -1, hoverGy = -1;
+            m_camera.screenToGrid(m_mouseX, m_mouseY, hoverGx, hoverGy);
+            m_renderer.render(m_map, m_registry, m_timeline, m_eventLine,
+                              m_replication, m_gestorHumanos, m_camera, m_selectedCell, m_mapMode,
+                              m_creationConfig, &m_advancement, &m_divinePowers, {hoverGx, hoverGy},
+                              &m_dayNightCycle, &m_cloudSystem);
+            const Religion* pRel = m_registry.getReligion(resolvePlayerReligionId());
+            int eraIdx = pRel ? static_cast<int>(pRel->currentEra) : 0;
+            m_renderer.renderGameOver(m_creationConfig, m_extinctionYear, eraIdx, m_hoveredMenuButtonId);
+        }
     } else {
         m_renderer.setFogOfWar(&m_fog);
         int hoverGx = -1, hoverGy = -1;
@@ -400,6 +551,37 @@ void Game::render() {
         m_renderer.renderCommandConsole(m_commandBoxOpen, m_commandInput,
                           m_cheatSelectorActive, m_commandFeedback,
                           m_cheatLuminusActive);
+    }
+
+    // EN: Render developer mode telemetry HUD, unit inspector and isometric 3D axes
+    // ES: Renderizar HUD de telemetría, inspector de unidades y ejes 3D isométricos del modo desarrollador
+    if (m_renderer.isDeveloperMode()) {
+        int hoverCellX = -1;
+        int hoverCellY = -1;
+        m_camera.screenToGrid(m_mouseX, m_mouseY, hoverCellX, hoverCellY);
+
+        const int hoveredVillagerId = m_gestorHumanos.findVillagerOnScreen(m_mouseX, m_mouseY, m_camera, m_map, -1);
+        const Humano* hoveredVillager = nullptr;
+        if (hoveredVillagerId > 0) {
+            for (const auto& villagerUnit : m_gestorHumanos.getVillagers()) {
+                if (villagerUnit.getId() == hoveredVillagerId) {
+                    hoveredVillager = &villagerUnit;
+                    break;
+                }
+            }
+        }
+        const Humano* selectedVillager = m_gestorHumanos.getSelectedVillager();
+
+        m_renderer.renderDeveloperOverlay(m_map, m_registry, m_timeline, m_gestorHumanos,
+                                          m_camera, Point2i{hoverCellX, hoverCellY},
+                                          hoveredVillager, selectedVillager,
+                                          m_creationConfig, &m_timeEngine, &m_dayNightCycle);
+    }
+
+    // EN: Apply post-processing visual tint filter selected in options
+    // ES: Aplicar filtro de tinte visual de postprocesamiento seleccionado en opciones
+    if (m_settings.colorFilter != VisualColorFilter::Neutral) {
+        m_renderer.applyVisualColorFilter(m_settings.colorFilter);
     }
 
     m_renderer.drawCursor(static_cast<int>(m_mouseX), static_cast<int>(m_mouseY));
@@ -427,7 +609,8 @@ void Game::castDivinePower(DivinePowerType divineType, int targetGridX, int targ
     const int playerRel = resolvePlayerReligionId();
     const CastResult castResult = m_divinePowers.castPower(divineType, targetGridX, targetGridY, m_map, m_registry,
                                                            m_gestorHumanos, m_timeline.getCurrentYear(),
-                                                           m_eventLine, playerRel);
+                                                           m_eventLine, playerRel,
+                                                           &m_buildingSystem, &m_replication);
     if (castResult.success) {
         showFeedback(castResult.message, 5.0f);
         if (divineType == DivinePowerType::Lightning) {
@@ -450,6 +633,18 @@ void Game::castDivinePower(DivinePowerType divineType, int targetGridX, int targ
             m_camera.addScreenShake(4.0f, 2.0f);
             m_dayNightCycle.triggerLightningFlash(0.4f);
             m_soundSystem.playSpatialSFX(SFXType::MeteorImpact, targetGridX, targetGridY, m_camera, 0.95f);
+        } else if (divineType == DivinePowerType::Rain) {
+            m_soundSystem.playSpatialSFX(SFXType::TornadoWhoosh, targetGridX, targetGridY, m_camera, 0.65f);
+        } else if (divineType == DivinePowerType::Deluge) {
+            m_camera.addScreenShake(7.0f, 3.5f);
+            m_dayNightCycle.triggerLightningFlash(0.5f);
+            m_soundSystem.playSpatialSFX(SFXType::Earthquake, targetGridX, targetGridY, m_camera, 1.10f);
+        } else if (divineType == DivinePowerType::AtomicBomb) {
+            // EN: Cataclysmic nuclear whiteout thermal flash, extreme screen shake, and authentic atomic explosion sound
+            // ES: Destello blanco térmico nuclear cataclísmico, sacudida extrema de pantalla y sonido auténtico de explosión atómica
+            m_camera.addScreenShake(30.0f, 6.0f);
+            m_dayNightCycle.triggerLightningFlash(2.0f);
+            m_soundSystem.playSpatialSFX(SFXType::AtomicExplosion, targetGridX, targetGridY, m_camera, 2.0f);
         } else if (divineType == DivinePowerType::Plague) {
             m_soundSystem.playSpatialSFX(SFXType::PlagueSwarm, targetGridX, targetGridY, m_camera, 1.0f);
         } else if (divineType == DivinePowerType::Miracle) {
@@ -465,11 +660,12 @@ void Game::castDivinePower(DivinePowerType divineType, int targetGridX, int targ
             const float deltaWorldX = livingVillager.getX() - static_cast<float>(targetGridX);
             const float deltaWorldY = livingVillager.getY() - static_cast<float>(targetGridY);
             if (std::hypot(deltaWorldX, deltaWorldY) <= 4.8f) {
-                if (divineType == DivinePowerType::Miracle) {
+                if (divineType == DivinePowerType::Miracle || divineType == DivinePowerType::Rain) {
                     m_nemesisSififus.onUnitSparedOrBlessed(livingVillager, m_timeline.getCurrentYear(), &m_eventLine, &m_registry);
                 } else if (divineType == DivinePowerType::Lightning || divineType == DivinePowerType::Meteor ||
                            divineType == DivinePowerType::Earthquake || divineType == DivinePowerType::Volcano ||
-                           divineType == DivinePowerType::Wildfire) {
+                           divineType == DivinePowerType::Wildfire || divineType == DivinePowerType::Deluge ||
+                           divineType == DivinePowerType::AtomicBomb) {
                     m_nemesisSififus.onUnitHitByDivinePower(livingVillager, 35.0f, m_timeline.getCurrentYear(), &m_eventLine, &m_registry);
                 }
             }
@@ -636,7 +832,7 @@ void Game::processButtonAction(int buttonId) {
             break;
         case 402: // Menu
             saveCurrentGame();
-            m_gameState = GameState::MainMenu;
+            returnToMainMenu();
             break;
 
         // Selección del líder espiritual (Chamán o Profeta)
@@ -702,6 +898,12 @@ void Game::processButtonAction(int buttonId) {
         case 725:
             toggleDivinePowerTargeting(DivinePowerType::Wildfire);
             break;
+        case 726:
+            toggleDivinePowerTargeting(DivinePowerType::Rain);
+            break;
+        case 727:
+            toggleDivinePowerTargeting(DivinePowerType::Deluge);
+            break;
         default: break;
     }
 }
@@ -711,17 +913,267 @@ void Game::onMouseDown(int mouseButton, float screenPosX, float screenPosY) {
     m_mouseY = screenPosY;
     if (m_gameState == GameState::MainMenu) {
         if (mouseButton == 1) {
-            int btnId = m_renderer.checkMenuButtonClicked(screenPosX, screenPosY, false);
-            if (btnId == 1) { // CREAR MUNDO -> Abrir ventana de configuración
-                m_gameState = GameState::WorldCreation;
-                m_activeInputField = 0;
-            } else if (btnId == 2) { // CARGAR MUNDO -> Abrir selector estilo Minecraft
+            const int clickedButtonId = m_renderer.checkMenuButtonClicked(screenPosX, screenPosY, false);
+            if (clickedButtonId == 1) { // CREAR MUNDO -> Abrir ventana de configuración con nueva semilla fresca
+                prepareForWorldCreation(true);
+            } else if (clickedButtonId == 2) { // CARGAR MUNDO -> Abrir selector estilo Minecraft
                 m_gameState = GameState::LoadWorldMenu;
                 m_selectedSaveIndex = 0;
-            } else if (btnId == 3) { // OPCIONES
+            } else if (clickedButtonId == 6) { // CREACION DE MAPAS -> Taller litúrgico de creación y edición
+                setupMapEditor();
+                m_soundSystem.playSFX(SFXType::UIClick);
+            } else if (clickedButtonId == 3) { // APRENDE A JUGAR -> Códice de aprendizaje y tutorial sagrado
+                m_previousGameState = GameState::MainMenu;
+                m_gameState = GameState::Tutorial;
+                m_currentTutorialTab = TutorialTab::BasicsAndFaith;
+                m_soundSystem.playSFX(SFXType::UIClick);
+            } else if (clickedButtonId == 4) { // OPCIONES
+                m_previousGameState = GameState::MainMenu;
                 m_gameState = GameState::Options;
-            } else if (btnId == 4) { // SALIR
+                m_soundSystem.playSFX(SFXType::UIClick);
+            } else if (clickedButtonId == 5) { // SALIR
                 m_isRunning = false;
+            }
+        }
+        return;
+    }
+
+    if (m_gameState == GameState::MapEditor) {
+        if (m_mapEditorConfig.viewMode == MapEditorViewMode::Cartographic2D) {
+            if (mouseButton == 1) {
+                const int btnId = m_renderer.checkMapEditorButtonClicked(screenPosX, screenPosY);
+                if (btnId > 0) {
+                    m_soundSystem.playSFX(SFXType::UIClick);
+                    // Botones de acción principales
+                    if (btnId == 880) { // Alternar a vista isométrica 2.5D
+                        m_mapEditorConfig.viewMode = MapEditorViewMode::Isometric25D;
+                        m_camera.reset(m_editorMap.getWidth(), m_editorMap.getHeight());
+                        m_camera.centerOnCell(m_editorMap.getWidth() / 2, m_editorMap.getHeight() / 2,
+                                              m_editorMap.getWidth(), m_editorMap.getHeight());
+                        m_camera.setZoom(1.0f);
+                        return;
+                    } else if (btnId == 890) { // JUGAR ESTE MAPA
+                        startPlayWithEditorMap();
+                        return;
+                    } else if (btnId == 891) { // GUARDAR MAPA
+                        m_currentSaveSlot = SaveSystem::generateUniqueSlotName("CustomMap", m_mapEditorConfig.mapSeed);
+                        SaveSystem::saveWorld(*this, m_currentSaveSlot);
+                        m_mapEditorConfig.statusMessage = "MAPA GUARDADO EN PARTIDAS EXITOSAMENTE (" + m_currentSaveSlot + ")";
+                        m_mapEditorConfig.statusTimer = 5.0f;
+                        return;
+                    } else if (btnId == 892) { // VOLVER AL MENÚ
+                        returnToMainMenu();
+                        return;
+                    }
+                    // Controles del Generador Procedimental
+                    else if (btnId == 801) { // Tamaño Anterior
+                        constexpr int TOTAL_MAP_SIZES = 8;
+                        m_mapEditorConfig.mapSizeIndex = (m_mapEditorConfig.mapSizeIndex + TOTAL_MAP_SIZES - 1) % TOTAL_MAP_SIZES;
+                        regenerateEditorMap();
+                    } else if (btnId == 802) { // Tamaño Siguiente
+                        constexpr int TOTAL_MAP_SIZES = 8;
+                        m_mapEditorConfig.mapSizeIndex = (m_mapEditorConfig.mapSizeIndex + 1) % TOTAL_MAP_SIZES;
+                        regenerateEditorMap();
+                    } else if (btnId == 803) { // Clima Anterior
+                        constexpr int TOTAL_CLIMATES = 4;
+                        uint8_t prevClim = (static_cast<uint8_t>(m_mapEditorConfig.worldClimate) + TOTAL_CLIMATES - 1) % TOTAL_CLIMATES;
+                        m_mapEditorConfig.worldClimate = static_cast<WorldClimate>(prevClim);
+                        regenerateEditorMap();
+                    } else if (btnId == 804) { // Clima Siguiente
+                        constexpr int TOTAL_CLIMATES = 4;
+                        uint8_t nextClim = (static_cast<uint8_t>(m_mapEditorConfig.worldClimate) + 1) % TOTAL_CLIMATES;
+                        m_mapEditorConfig.worldClimate = static_cast<WorldClimate>(nextClim);
+                        regenerateEditorMap();
+                    } else if (btnId == 805) { // Abundancia Anterior
+                        constexpr int TOTAL_ABUNDANCES = 3;
+                        uint8_t prevAbund = (static_cast<uint8_t>(m_mapEditorConfig.resourceAbundance) + TOTAL_ABUNDANCES - 1) % TOTAL_ABUNDANCES;
+                        m_mapEditorConfig.resourceAbundance = static_cast<ResourceAbundance>(prevAbund);
+                        regenerateEditorMap();
+                    } else if (btnId == 806) { // Abundancia Siguiente
+                        constexpr int TOTAL_ABUNDANCES = 3;
+                        uint8_t nextAbund = (static_cast<uint8_t>(m_mapEditorConfig.resourceAbundance) + 1) % TOTAL_ABUNDANCES;
+                        m_mapEditorConfig.resourceAbundance = static_cast<ResourceAbundance>(nextAbund);
+                        regenerateEditorMap();
+                    } else if (btnId == 807) { // Semilla Cuadro de Texto
+                        m_activeInputField = 807;
+                    } else if (btnId == 808) { // Semilla Dado / Aleatoria
+                        m_mapEditorConfig.mapSeed = generateUniqueSeed();
+                        regenerateEditorMap();
+                    } else if (btnId == 810) { // Regenerar Procedimental
+                        regenerateEditorMap();
+                    }
+                    // Radio del Pincel
+                    else if (btnId == 821) { m_mapEditorConfig.brushRadius = 1; }
+                    else if (btnId == 822) { m_mapEditorConfig.brushRadius = 2; }
+                    else if (btnId == 823) { m_mapEditorConfig.brushRadius = 3; }
+                    // Biomas y Terreno
+                    else if (btnId == 831) { m_mapEditorConfig.activeBrush = MapEditorBrush::Ocean; }
+                    else if (btnId == 832) { m_mapEditorConfig.activeBrush = MapEditorBrush::ShallowWater; }
+                    else if (btnId == 833) { m_mapEditorConfig.activeBrush = MapEditorBrush::FertileValley; }
+                    else if (btnId == 834) { m_mapEditorConfig.activeBrush = MapEditorBrush::DenseForest; }
+                    else if (btnId == 835) { m_mapEditorConfig.activeBrush = MapEditorBrush::HighlandHills; }
+                    else if (btnId == 836) { m_mapEditorConfig.activeBrush = MapEditorBrush::RuggedMountains; }
+                    else if (btnId == 837) { m_mapEditorConfig.activeBrush = MapEditorBrush::AridDesert; }
+                    else if (btnId == 838) { m_mapEditorConfig.activeBrush = MapEditorBrush::FrozenTundra; }
+                    else if (btnId == 839) { m_mapEditorConfig.activeBrush = MapEditorBrush::VolcanicCaldera; }
+                    // Yacimientos y Recursos
+                    else if (btnId == 841) { m_mapEditorConfig.activeBrush = MapEditorBrush::Wood; }
+                    else if (btnId == 842) { m_mapEditorConfig.activeBrush = MapEditorBrush::Stone; }
+                    else if (btnId == 843) { m_mapEditorConfig.activeBrush = MapEditorBrush::Gold; }
+                    else if (btnId == 844) { m_mapEditorConfig.activeBrush = MapEditorBrush::Iron; }
+                    else if (btnId == 845) { m_mapEditorConfig.activeBrush = MapEditorBrush::Copper; }
+                    else if (btnId == 846) { m_mapEditorConfig.activeBrush = MapEditorBrush::Diamond; }
+                    else if (btnId == 847) { m_mapEditorConfig.activeBrush = MapEditorBrush::ClearResource; }
+                    // Elevación e Inspección
+                    else if (btnId == 851) { m_mapEditorConfig.activeBrush = MapEditorBrush::RaiseElevation; }
+                    else if (btnId == 852) { m_mapEditorConfig.activeBrush = MapEditorBrush::LowerElevation; }
+                    else if (btnId == 855) { m_mapEditorConfig.activeBrush = MapEditorBrush::Inspect; }
+                    return;
+                }
+
+                // Clic sobre el lienzo de vista previa cartográfica -> Pintar con el pincel activo
+                const Point2i clickedCell = m_renderer.screenToMapEditorCell(screenPosX, screenPosY, m_editorMap);
+                if (clickedCell.x >= 0 && clickedCell.y >= 0) {
+                    m_isPaintingMapEditor = true;
+                    applyMapEditorBrush(clickedCell.x, clickedCell.y);
+                }
+            }
+            return;
+        }
+
+        // EN: Isometric 2.5D View Mode Mouse Handling
+        // ES: Manejo del ratón en Modo de Vista Isométrica 2.5D
+        if (mouseButton == 1) {
+            const int isoBtnId = m_renderer.checkMapEditorIsometricButtonClicked(screenPosX, screenPosY);
+            if (isoBtnId > 0) {
+                m_soundSystem.playSFX(SFXType::UIClick);
+                if (isoBtnId == 880) { // Alternar a vista cartográfica 2D
+                    m_mapEditorConfig.viewMode = MapEditorViewMode::Cartographic2D;
+                    return;
+                } else if (isoBtnId == 890) { // JUGAR ESTE MAPA
+                    startPlayWithEditorMap();
+                    return;
+                } else if (isoBtnId == 891) { // GUARDAR MAPA
+                    m_currentSaveSlot = SaveSystem::generateUniqueSlotName("CustomMap", m_mapEditorConfig.mapSeed);
+                    SaveSystem::saveWorld(*this, m_currentSaveSlot);
+                    m_mapEditorConfig.statusMessage = "MAPA GUARDADO EN PARTIDAS EXITOSAMENTE (" + m_currentSaveSlot + ")";
+                    m_mapEditorConfig.statusTimer = 5.0f;
+                    return;
+                } else if (isoBtnId == 892) { // SALIR
+                    returnToMainMenu();
+                    return;
+                } else if (isoBtnId == 808) { // DADO
+                    m_mapEditorConfig.mapSeed = generateUniqueSeed();
+                    regenerateEditorMap();
+                    return;
+                } else if (isoBtnId == 810) { // REGENERAR
+                    regenerateEditorMap();
+                    return;
+                }
+                // Categorías de pestañas
+                else if (isoBtnId == 871) { m_mapEditorConfig.paletteTab = 0; return; }
+                else if (isoBtnId == 872) { m_mapEditorConfig.paletteTab = 1; return; }
+                else if (isoBtnId == 873) { m_mapEditorConfig.paletteTab = 2; return; }
+                // Radios de pincel
+                else if (isoBtnId == 821) { m_mapEditorConfig.brushRadius = 1; return; }
+                else if (isoBtnId == 822) { m_mapEditorConfig.brushRadius = 2; return; }
+                else if (isoBtnId == 823) { m_mapEditorConfig.brushRadius = 3; return; }
+                // Mosaicos del Atlas de terreno (900-915)
+                else if (isoBtnId == 900) { m_mapEditorConfig.activeBrush = MapEditorBrush::TileGrass; return; }
+                else if (isoBtnId == 901) { m_mapEditorConfig.activeBrush = MapEditorBrush::TileRock; return; }
+                else if (isoBtnId == 902) { m_mapEditorConfig.activeBrush = MapEditorBrush::TileTropicalPlains; return; }
+                else if (isoBtnId == 903) { m_mapEditorConfig.activeBrush = MapEditorBrush::TileFarmland; return; }
+                else if (isoBtnId == 904) { m_mapEditorConfig.activeBrush = MapEditorBrush::TileDeepOceanAlt; return; }
+                else if (isoBtnId == 905) { m_mapEditorConfig.activeBrush = MapEditorBrush::TileRichForest; return; }
+                else if (isoBtnId == 906) { m_mapEditorConfig.activeBrush = MapEditorBrush::TileHighlands; return; }
+                else if (isoBtnId == 907) { m_mapEditorConfig.activeBrush = MapEditorBrush::TileSwamp; return; }
+                else if (isoBtnId == 908) { m_mapEditorConfig.activeBrush = MapEditorBrush::TileSand; return; }
+                else if (isoBtnId == 909) { m_mapEditorConfig.activeBrush = MapEditorBrush::TileSnow; return; }
+                else if (isoBtnId == 910) { m_mapEditorConfig.activeBrush = MapEditorBrush::TileShallowWater; return; }
+                else if (isoBtnId == 911) { m_mapEditorConfig.activeBrush = MapEditorBrush::TileMidOcean; return; }
+                else if (isoBtnId == 912) { m_mapEditorConfig.activeBrush = MapEditorBrush::TileCaveWater; return; }
+                else if (isoBtnId == 913) { m_mapEditorConfig.activeBrush = MapEditorBrush::TileAbyssal; return; }
+                else if (isoBtnId == 914) { m_mapEditorConfig.activeBrush = MapEditorBrush::TileOpenOcean; return; }
+                else if (isoBtnId == 915) { m_mapEditorConfig.activeBrush = MapEditorBrush::TileLava; return; }
+                // Recursos, Flora y Elementos
+                else if (isoBtnId == 841) { m_mapEditorConfig.activeBrush = MapEditorBrush::Wood; return; }
+                else if (isoBtnId == 842) { m_mapEditorConfig.activeBrush = MapEditorBrush::Stone; return; }
+                else if (isoBtnId == 843) { m_mapEditorConfig.activeBrush = MapEditorBrush::Gold; return; }
+                else if (isoBtnId == 844) { m_mapEditorConfig.activeBrush = MapEditorBrush::Iron; return; }
+                else if (isoBtnId == 845) { m_mapEditorConfig.activeBrush = MapEditorBrush::Copper; return; }
+                else if (isoBtnId == 846) { m_mapEditorConfig.activeBrush = MapEditorBrush::Diamond; return; }
+                else if (isoBtnId == 839) { m_mapEditorConfig.activeBrush = MapEditorBrush::VolcanicCaldera; return; }
+                else if (isoBtnId == 920) { m_mapEditorConfig.activeBrush = MapEditorBrush::TileCrater; return; }
+                else if (isoBtnId == 921) { m_mapEditorConfig.activeBrush = MapEditorBrush::TileAsh; return; }
+                else if (isoBtnId == 847) { m_mapEditorConfig.activeBrush = MapEditorBrush::ClearResource; return; }
+                // Topografía y Biomas
+                else if (isoBtnId == 851) { m_mapEditorConfig.activeBrush = MapEditorBrush::RaiseElevation; return; }
+                else if (isoBtnId == 852) { m_mapEditorConfig.activeBrush = MapEditorBrush::LowerElevation; return; }
+                else if (isoBtnId == 853) { m_mapEditorConfig.activeBrush = MapEditorBrush::FlattenElevation; return; }
+                else if (isoBtnId == 855) { m_mapEditorConfig.activeBrush = MapEditorBrush::Inspect; return; }
+                else if (isoBtnId == 831) { m_mapEditorConfig.activeBrush = MapEditorBrush::Ocean; return; }
+                else if (isoBtnId == 832) { m_mapEditorConfig.activeBrush = MapEditorBrush::ShallowWater; return; }
+                else if (isoBtnId == 833) { m_mapEditorConfig.activeBrush = MapEditorBrush::FertileValley; return; }
+                else if (isoBtnId == 834) { m_mapEditorConfig.activeBrush = MapEditorBrush::DenseForest; return; }
+                else if (isoBtnId == 835) { m_mapEditorConfig.activeBrush = MapEditorBrush::HighlandHills; return; }
+                else if (isoBtnId == 836) { m_mapEditorConfig.activeBrush = MapEditorBrush::RuggedMountains; return; }
+                else if (isoBtnId == 837) { m_mapEditorConfig.activeBrush = MapEditorBrush::AridDesert; return; }
+                else if (isoBtnId == 838) { m_mapEditorConfig.activeBrush = MapEditorBrush::FrozenTundra; return; }
+                return;
+            }
+
+            // EN: Clicked on the live isometric 2.5D world -> Paint cell under cursor
+            // ES: Clic sobre el mundo 2.5D isométrico vivo -> Pintar celda bajo el cursor
+            int isoTargetGridX = -1;
+            int isoTargetGridY = -1;
+            m_camera.screenToGrid(screenPosX, screenPosY, isoTargetGridX, isoTargetGridY);
+            if (m_editorMap.isValid(isoTargetGridX, isoTargetGridY)) {
+                m_isPaintingMapEditor = true;
+                applyMapEditorBrush(isoTargetGridX, isoTargetGridY);
+            }
+        } else if (mouseButton == 2 || mouseButton == 3) {
+            // EN: Right-click / Middle-click drags and pans isometric camera
+            // ES: Clic derecho o central arrastra y desplaza la cámara isométrica
+            m_camera.startDrag(screenPosX, screenPosY);
+        }
+        return;
+    }
+
+    if (m_gameState == GameState::Tutorial) {
+        if (mouseButton == 1) {
+            const int clickedTutorialButtonId = m_renderer.checkTutorialButtonClicked(screenPosX, screenPosY);
+            // EN: Tab switching between the 4 codex categories
+            // ES: Cambio de pestaña entre las 4 categorías del códice
+            if (clickedTutorialButtonId == 2001) {
+                m_currentTutorialTab = TutorialTab::BasicsAndFaith;
+                m_soundSystem.playSFX(SFXType::UIClick);
+            } else if (clickedTutorialButtonId == 2002) {
+                m_currentTutorialTab = TutorialTab::ControlsAndCamera;
+                m_soundSystem.playSFX(SFXType::UIClick);
+            } else if (clickedTutorialButtonId == 2003) {
+                m_currentTutorialTab = TutorialTab::VillagersAndEcology;
+                m_soundSystem.playSFX(SFXType::UIClick);
+            } else if (clickedTutorialButtonId == 2004) {
+                m_currentTutorialTab = TutorialTab::MiraclesAndEras;
+                m_soundSystem.playSFX(SFXType::UIClick);
+            }
+            // EN: Bottom pagination and return action controls
+            // ES: Controles inferiores de paginación y acción de regreso
+            else if (clickedTutorialButtonId == 2010) { // < ANTERIOR
+                const int currentTabIndex = static_cast<int>(m_currentTutorialTab);
+                if (currentTabIndex > 0) {
+                    m_currentTutorialTab = static_cast<TutorialTab>(currentTabIndex - 1);
+                    m_soundSystem.playSFX(SFXType::UIClick);
+                }
+            } else if (clickedTutorialButtonId == 2011) { // VOLVER AL MENU
+                m_soundSystem.playSFX(SFXType::UIClick);
+                returnToMainMenu();
+            } else if (clickedTutorialButtonId == 2012) { // SIGUIENTE >
+                const int currentTabIndex = static_cast<int>(m_currentTutorialTab);
+                if (currentTabIndex + 1 < static_cast<int>(TutorialTab::Count)) {
+                    m_currentTutorialTab = static_cast<TutorialTab>(currentTabIndex + 1);
+                    m_soundSystem.playSFX(SFXType::UIClick);
+                }
             }
         }
         return;
@@ -731,8 +1183,7 @@ void Game::onMouseDown(int mouseButton, float screenPosX, float screenPosY) {
         if (mouseButton == 1) {
             int btnId = m_renderer.checkCreationButtonClicked(screenPosX, screenPosY);
             if (btnId == 550) { // Cancelar y volver
-                m_gameState = GameState::MainMenu;
-                m_activeInputField = 0;
+                returnToMainMenu();
             } else if (btnId == 551) { // Comenzar Génesis
                 startNewCustomWorld();
             } else if (btnId == 501) { // Input Dios
@@ -742,12 +1193,14 @@ void Game::onMouseDown(int mouseButton, float screenPosX, float screenPosY) {
             } else if (btnId == 503) { // Input Seed
                 m_activeInputField = 503;
             } else if (btnId == 504) { // Randomize Seed
-                m_creationConfig.mapSeed = static_cast<uint32_t>(std::time(nullptr)) ^ 0x5F3759DF;
+                m_creationConfig.mapSeed = generateUniqueSeed();
             } else if (btnId == 505) { // Ciclar población de aldeanos reales
                 if (m_creationConfig.initialPopulation == 40) m_creationConfig.initialPopulation = 80;
                 else if (m_creationConfig.initialPopulation == 80) m_creationConfig.initialPopulation = 120;
                 else if (m_creationConfig.initialPopulation == 120) m_creationConfig.initialPopulation = 180;
                 else if (m_creationConfig.initialPopulation == 180) m_creationConfig.initialPopulation = 250;
+                else if (m_creationConfig.initialPopulation == 250) m_creationConfig.initialPopulation = 350;
+                else if (m_creationConfig.initialPopulation == 350) m_creationConfig.initialPopulation = 500;
                 else m_creationConfig.initialPopulation = 40;
             } else if (btnId == 516) { // Input Recursos Iniciales (Caja de texto o ciclo al hacer clic)
                 if (m_creationConfig.initialResources == 100) m_creationConfig.initialResources = 250;
@@ -760,7 +1213,8 @@ void Game::onMouseDown(int mouseButton, float screenPosX, float screenPosY) {
                 uint8_t nextEra = (static_cast<uint8_t>(m_creationConfig.startingEra) + 1) % 8;
                 m_creationConfig.startingEra = static_cast<HistoricalEra>(nextEra);
             } else if (btnId == 507) { // Ciclar tamaño del mapa
-                m_creationConfig.mapSizeIndex = (m_creationConfig.mapSizeIndex + 1) % 3;
+                constexpr int TOTAL_MAP_SIZES = 8;
+                m_creationConfig.mapSizeIndex = (m_creationConfig.mapSizeIndex + 1) % TOTAL_MAP_SIZES;
             } else if (btnId == 520) { // Ciclar clima primordial del mundo
                 uint8_t nextClimate = (static_cast<uint8_t>(m_creationConfig.worldClimate) + 1) % 4;
                 m_creationConfig.worldClimate = static_cast<WorldClimate>(nextClimate);
@@ -809,15 +1263,14 @@ void Game::onMouseDown(int mouseButton, float screenPosX, float screenPosY) {
                     SaveSystem::loadWorld(*this, saves[m_selectedSaveIndex].folderName);
                 }
             } else if (btnId == 602) { // CREAR NUEVO
-                m_gameState = GameState::WorldCreation;
-                m_activeInputField = 0;
+                prepareForWorldCreation(true);
             } else if (btnId == 603) { // ELIMINAR
                 if (!saves.empty() && m_selectedSaveIndex >= 0 && m_selectedSaveIndex < static_cast<int>(saves.size())) {
                     SaveSystem::deleteWorld(saves[m_selectedSaveIndex].folderName);
                     m_selectedSaveIndex = 0;
                 }
             } else if (btnId == 604) { // CANCELAR
-                m_gameState = GameState::MainMenu;
+                returnToMainMenu();
             }
         }
         return;
@@ -825,31 +1278,167 @@ void Game::onMouseDown(int mouseButton, float screenPosX, float screenPosY) {
 
     if (m_gameState == GameState::Options) {
         if (mouseButton == 1) {
-            int btnId = m_renderer.checkMenuButtonClicked(screenPosX, screenPosY, true);
-            if (btnId == 12) { // VOLVER AL MENU
-                m_gameState = GameState::MainMenu;
+            const int clickedButtonId = m_renderer.checkOptionsMenuButtonClicked(screenPosX, screenPosY, m_currentOptionsTab);
+            if (clickedButtonId > 0) {
+                m_soundSystem.playSFX(SFXType::UIClick);
+            }
+
+            // EN: Category navigation tabs
+            // ES: Pestañas de navegación de categorías
+            if (clickedButtonId == 1001) {
+                m_currentOptionsTab = OptionsTab::ScreenAndVideo;
+            } else if (clickedButtonId == 1002) {
+                m_currentOptionsTab = OptionsTab::GraphicsAndImage;
+            } else if (clickedButtonId == 1003) {
+                m_currentOptionsTab = OptionsTab::GameplayAndSimulation;
+            } else if (clickedButtonId == 1004) {
+                m_currentOptionsTab = OptionsTab::AudioAndSound;
+            }
+            // EN: Screen and video options
+            // ES: Opciones de pantalla y video
+            else if (clickedButtonId == 1010) {
+                m_settings.cycleResolution();
+                applySettings(m_settings);
+                saveSettings();
+            } else if (clickedButtonId == 1011) {
+                m_settings.cycleDisplayMode();
+                applySettings(m_settings);
+                saveSettings();
+            } else if (clickedButtonId == 1012) {
+                m_settings.cycleFrameRateLimit();
+                applySettings(m_settings);
+            } else if (clickedButtonId == 1013) {
+                m_settings.toggleVerticalSync();
+                applySettings(m_settings);
+            } else if (clickedButtonId == 1014) {
+                m_settings.cycleUiScale();
+                applySettings(m_settings);
+            } else if (clickedButtonId == 1015) {
+                m_settings.cycleBrightness();
+                applySettings(m_settings);
+            }
+            // EN: Graphics and image options
+            // ES: Opciones de gráficos e imagen
+            else if (clickedButtonId == 1020) {
+                m_settings.cycleCloudShadows();
+                applySettings(m_settings);
+            } else if (clickedButtonId == 1021) {
+                m_settings.cycleDynamicLighting();
+                applySettings(m_settings);
+            } else if (clickedButtonId == 1022) {
+                m_settings.cycleWaterAnimation();
+                applySettings(m_settings);
+            } else if (clickedButtonId == 1023) {
+                m_settings.toggleVignette();
+                applySettings(m_settings);
+            } else if (clickedButtonId == 1024) {
+                m_settings.cycleScreenShake();
+                applySettings(m_settings);
+            } else if (clickedButtonId == 1025) {
+                m_settings.cycleVisualColorFilter();
+                applySettings(m_settings);
+            } else if (clickedButtonId == 1026) {
+                // EN: Toggle terrain isometric grid visualization
+                // ES: Alternar visualización de retícula isométrica de terreno
+                m_settings.toggleIsometricGrid();
+                applySettings(m_settings);
+            } else if (clickedButtonId == 1027) {
+                // EN: Toggle developer mode telemetry and axes overlay
+                // ES: Alternar telemetría y ejes del modo desarrollador
+                m_settings.toggleDeveloperMode();
+                applySettings(m_settings);
+            }
+            // EN: Gameplay and simulation options
+            // ES: Opciones de jugabilidad y simulación
+            else if (clickedButtonId == 1030) {
+                m_settings.cycleSimulationSpeed();
+                applySettings(m_settings);
+            } else if (clickedButtonId == 1031) {
+                m_settings.toggleAutoPauseOnDisasters();
+                applySettings(m_settings);
+            } else if (clickedButtonId == 1032) {
+                m_settings.cycleCameraPanSpeed();
+                applySettings(m_settings);
+            } else if (clickedButtonId == 1033) {
+                m_settings.toggleInvertCameraDrag();
+                applySettings(m_settings);
+            } else if (clickedButtonId == 1034) {
+                m_settings.toggleFloatingNumbers();
+                applySettings(m_settings);
+            } else if (clickedButtonId == 1035) {
+                m_settings.cycleLifeEventNotifications();
+                applySettings(m_settings);
+            }
+            // EN: Audio and sound options
+            // ES: Opciones de audio y sonido
+            else if (clickedButtonId == 1040) {
+                m_settings.cycleMasterVolume();
+                applySettings(m_settings);
+            } else if (clickedButtonId == 1041) {
+                m_settings.cycleMusicVolume();
+                applySettings(m_settings);
+            } else if (clickedButtonId == 1042) {
+                m_settings.cycleSfxVolume();
+                applySettings(m_settings);
+            } else if (clickedButtonId == 1043) {
+                m_settings.cycleAmbientVolume();
+                applySettings(m_settings);
+            } else if (clickedButtonId == 1044) {
+                m_settings.toggleSoundMute();
+                applySettings(m_settings);
+            }
+            // EN: Bottom modal actions
+            // ES: Acciones del pie del modal
+            else if (clickedButtonId == 1090) { // Restaurar
+                m_settings.resetToDefaults();
+                applySettings(m_settings);
+            } else if (clickedButtonId == 1091 || clickedButtonId == 12) { // Guardar y Volver
+                saveSettings();
+                m_gameState = m_previousGameState;
             }
         }
         return;
     }
 
     if (m_gameState == GameState::GameOver) {
-        if (mouseButton == 1) {
-            int btnId = m_renderer.checkGameOverButtonClicked(screenPosX, screenPosY);
-            if (btnId == 901) { // REINTENTAR GÉNESIS
-                m_gameState = GameState::WorldCreation;
-                m_activeInputField = 0;
-                m_gameOverTriggered = false;
-                m_gameOverTimer = 0.0f;
-            } else if (btnId == 902) { // CARGAR PARTIDA
-                m_gameState = GameState::LoadWorldMenu;
-                m_selectedSaveIndex = 0;
-                m_gameOverTriggered = false;
-                m_gameOverTimer = 0.0f;
-            } else if (btnId == 903) { // MENÚ PRINCIPAL
-                m_gameState = GameState::MainMenu;
-                m_gameOverTriggered = false;
-                m_gameOverTimer = 0.0f;
+        if (m_isSpectatingPostDefeat) {
+            if (mouseButton == 1) {
+                const int specBtnId = m_renderer.checkSpectatorButtonClicked(screenPosX, screenPosY);
+                if (specBtnId == 905) { // VER EPITAFIO
+                    m_isSpectatingPostDefeat = false;
+                    m_soundSystem.playSFX(SFXType::UIClick);
+                    return;
+                } else if (specBtnId == 906) { // NIEBLA
+                    m_spectatorRevealAll = !m_spectatorRevealAll;
+                    m_soundSystem.playSFX(SFXType::UIClick);
+                    return;
+                } else if (specBtnId == 901) { // REINTENTAR GÉNESIS
+                    prepareForWorldCreation(true);
+                    return;
+                } else if (specBtnId == 903) { // MENÚ PRINCIPAL
+                    returnToMainMenu();
+                    return;
+                }
+            }
+            if (mouseButton == 1 || mouseButton == 2 || mouseButton == 3) {
+                m_camera.startDrag(screenPosX, screenPosY);
+            }
+        } else {
+            if (mouseButton == 1) {
+                const int btnId = m_renderer.checkGameOverButtonClicked(screenPosX, screenPosY);
+                if (btnId == 904) { // OBSERVAR MUNDO / VER MAPA
+                    m_isSpectatingPostDefeat = true;
+                    m_soundSystem.playSFX(SFXType::UIClick);
+                } else if (btnId == 901) { // REINTENTAR GÉNESIS
+                    prepareForWorldCreation(true);
+                } else if (btnId == 902) { // CARGAR PARTIDA
+                    m_gameState = GameState::LoadWorldMenu;
+                    m_selectedSaveIndex = 0;
+                    m_gameOverTriggered = false;
+                    m_gameOverTimer = 0.0f;
+                } else if (btnId == 903) { // MENÚ PRINCIPAL
+                    returnToMainMenu();
+                }
             }
         }
         return;
@@ -911,10 +1500,41 @@ void Game::onMouseDown(int mouseButton, float screenPosX, float screenPosY) {
             } else if (action == 2) { // Convalidar avance
                 Religion* pRel = m_registry.getReligion(PLAYER_RELIGION_ID);
                 if (pRel) {
+                    const FaithAdvancement* targetAdv = m_advancement.getAdvancement(selAdvId);
+                    const bool isEraCapstone = (targetAdv && targetAdv->isEraCapstone);
+                    HistoricalEra unlockedEra = targetAdv ? targetAdv->unlocksEra : HistoricalEra::PrimordialAnimism;
+
                     std::vector<GameEvent> newEvents;
                     if (m_advancement.convalidateAdvancement(*pRel, selAdvId, m_timeline.getCurrentYear(), newEvents)) {
                         for (const auto& ev : newEvents) {
                             m_eventLine.addEvent(ev);
+                        }
+
+                        // EN: Apply civilizational momentum to the timeline
+                        // ES: Aplicar impulso civilizatorio a la línea temporal
+                        float leapDtYears = 0.0f;
+                        if (isEraCapstone) {
+                            const int targetEraStart = AdvancementSystem::getEraStartYear(unlockedEra);
+                            const int currentYearVal = m_timeline.getCurrentYear();
+                            const int leapAmount = std::max(50, targetEraStart - currentYearVal);
+                            m_timeline.applyAdvancementHistoricalLeap(leapAmount, leapDtYears);
+                            m_soundSystem.playSFX(SFXType::EraAscension, 1.0f);
+                        } else {
+                            constexpr int standardDoctrineLeapYears = 25;
+                            m_timeline.applyAdvancementHistoricalLeap(standardDoctrineLeapYears, leapDtYears);
+                            m_soundSystem.playSFX(SFXType::FaithGain, 0.9f);
+                        }
+
+                        if (leapDtYears > 0.0f) {
+                            m_timeEngine.setYear(static_cast<double>(m_timeline.getCurrentYear()));
+                            // EN: Propagate macro-historical changes
+                            // ES: Propagar cambios macro-históricos
+                            m_advancement.updateAdvancements(m_registry, m_timeline.getCurrentYear(), newEvents);
+                            m_replication.update(m_map, m_registry, leapDtYears, newEvents, m_timeline.getCurrentYear());
+                            m_agglutination.update(m_map, m_registry, leapDtYears, newEvents, m_timeline.getCurrentYear());
+                            for (const auto& ev : newEvents) {
+                                m_eventLine.addEvent(ev);
+                            }
                         }
                     }
                 }
@@ -1010,14 +1630,14 @@ void Game::onMouseDown(int mouseButton, float screenPosX, float screenPosY) {
 
             // Primero buscar si se hizo clic directamente sobre el sprite de un aldeano en pantalla.
             // Fog of War: sólo se pueden seleccionar unidades del pueblo del jugador
-            // (salvo con el truco SELECTOR, que permite seleccionar cualquier unidad).
-            const int onlyRel = m_cheatSelectorActive ? -1 : PLAYER_RELIGION_ID;
+            // (salvo con el truco SELECTOR o Modo Desarrollador, que permite seleccionar e inspeccionar cualquier unidad).
+            const int onlyRel = (m_cheatSelectorActive || m_developerMode) ? -1 : PLAYER_RELIGION_ID;
             int humanoId = m_gestorHumanos.buscarHumanoEnPantalla(screenPosX, screenPosY, m_camera, m_map, onlyRel);
             if (humanoId <= 0) {
                 humanoId = m_gestorHumanos.buscarHumanoCercano(static_cast<float>(gridCellX) + 0.5f,
                                                                static_cast<float>(gridCellY) + 0.5f, 0.85f, onlyRel);
             }
-            if (humanoId > 0 && !m_cheatSelectorActive) {
+            if (humanoId > 0 && !m_cheatSelectorActive && !m_developerMode) {
                 const Humano* cand = nullptr;
                 for (const auto& hh : m_gestorHumanos.getHumanos()) {
                     if (hh.getId() == humanoId) { cand = &hh; break; }
@@ -1083,10 +1703,17 @@ void Game::onMouseDown(int mouseButton, float screenPosX, float screenPosY) {
 }
 
 void Game::onMouseUp(int mouseButton, float screenPosX, float screenPosY) {
+    if (m_gameState == GameState::GameOver && m_isSpectatingPostDefeat) {
+        if (mouseButton == 1 || mouseButton == 2 || mouseButton == 3) {
+            m_camera.endDrag();
+        }
+        return;
+    }
     if (mouseButton == 1) {
         m_scrubbingTimeline = false;
+        m_isPaintingMapEditor = false;
         m_renderer.setMouseDown(false, screenPosX, screenPosY);
-    } else if (mouseButton == 3) {
+    } else if (mouseButton == 2 || mouseButton == 3) {
         m_camera.endDrag();
     }
 }
@@ -1097,6 +1724,34 @@ void Game::onMouseMove(float screenPosX, float screenPosY) {
     m_renderer.setMousePosition(screenPosX, screenPosY);
     if (m_gameState == GameState::MainMenu) {
         m_hoveredMenuButtonId = m_renderer.checkMenuButtonClicked(screenPosX, screenPosY, false);
+        return;
+    }
+    if (m_gameState == GameState::MapEditor) {
+        if (m_mapEditorConfig.viewMode == MapEditorViewMode::Cartographic2D) {
+            m_hoveredMenuButtonId = m_renderer.checkMapEditorButtonClicked(screenPosX, screenPosY);
+            if (m_isPaintingMapEditor) {
+                const Point2i cell = m_renderer.screenToMapEditorCell(screenPosX, screenPosY, m_editorMap);
+                if (cell.x >= 0 && cell.y >= 0) {
+                    applyMapEditorBrush(cell.x, cell.y);
+                }
+            }
+        } else {
+            m_hoveredMenuButtonId = m_renderer.checkMapEditorIsometricButtonClicked(screenPosX, screenPosY);
+            if (m_camera.isDragging()) {
+                m_camera.updateDrag(screenPosX, screenPosY);
+            } else if (m_isPaintingMapEditor) {
+                int isoDragGridX = -1;
+                int isoDragGridY = -1;
+                m_camera.screenToGrid(screenPosX, screenPosY, isoDragGridX, isoDragGridY);
+                if (m_editorMap.isValid(isoDragGridX, isoDragGridY)) {
+                    applyMapEditorBrush(isoDragGridX, isoDragGridY);
+                }
+            }
+        }
+        return;
+    }
+    if (m_gameState == GameState::Tutorial) {
+        m_hoveredMenuButtonId = m_renderer.checkTutorialButtonClicked(screenPosX, screenPosY);
         return;
     }
     if (m_gameState == GameState::WorldCreation) {
@@ -1110,12 +1765,19 @@ void Game::onMouseMove(float screenPosX, float screenPosY) {
     }
 
     if (m_gameState == GameState::Options) {
-        m_hoveredMenuButtonId = m_renderer.checkMenuButtonClicked(screenPosX, screenPosY, true);
+        m_hoveredMenuButtonId = m_renderer.checkOptionsMenuButtonClicked(screenPosX, screenPosY, m_currentOptionsTab);
         return;
     }
 
     if (m_gameState == GameState::GameOver) {
-        m_hoveredMenuButtonId = m_renderer.checkGameOverButtonClicked(screenPosX, screenPosY);
+        if (m_isSpectatingPostDefeat) {
+            if (m_camera.isDragging()) {
+                m_camera.updateDrag(screenPosX, screenPosY);
+            }
+            m_hoveredMenuButtonId = m_renderer.checkSpectatorButtonClicked(screenPosX, screenPosY);
+        } else {
+            m_hoveredMenuButtonId = m_renderer.checkGameOverButtonClicked(screenPosX, screenPosY);
+        }
         return;
     }
 
@@ -1151,18 +1813,89 @@ void Game::onMouseWheel(float wheelDelta, float screenPosX, float screenPosY) {
 }
 
 void Game::onKeyPress(int keySym) {
+    // EN: Global F3 key shortcut to toggle Developer Mode telemetry and axes overlay
+    // ES: Atajo global de tecla F3 para alternar telemetría y ejes del Modo Desarrollador
+    constexpr int KEYSYM_F3_CUSTOM = 1003;
+    constexpr int KEYSYM_F3_X11 = 0xFFBE; // XK_F3
+    if (keySym == KEYSYM_F3_CUSTOM || keySym == KEYSYM_F3_X11 || keySym == '`' || keySym == '~') {
+        toggleDeveloperMode();
+        return;
+    }
+
+    // EN: Global F11 key shortcut to toggle Borderless Fullscreen / Windowed display mode
+    // ES: Atajo global de tecla F11 para alternar modo de pantalla completa sin bordes / ventana
+    constexpr int KEYSYM_F11_CUSTOM = 1011;
+    constexpr int KEYSYM_F11_X11 = 0xFFC8; // XK_F11
+    if (keySym == KEYSYM_F11_CUSTOM || keySym == KEYSYM_F11_X11) {
+        m_settings.cycleDisplayMode();
+        applySettings(m_settings);
+        saveSettings();
+        return;
+    }
+
     if (m_gameState == GameState::GameOver) {
-        if (keySym == 27) { // ESC -> Salir al menú principal
-            m_gameState = GameState::MainMenu;
-            m_gameOverTriggered = false;
-            m_gameOverTimer = 0.0f;
+        if (m_isSpectatingPostDefeat) {
+            // EN: Return to GameOver epitafio summary on ESC, V, or M
+            // ES: Regresar al resumen del epitafio de derrota con ESC, V o M
+            if (keySym == 27 || keySym == 'v' || keySym == 'V' || keySym == 'm' || keySym == 'M') {
+                m_isSpectatingPostDefeat = false;
+                m_soundSystem.playSFX(SFXType::UIClick);
+                return;
+            }
+            if (keySym == 'f' || keySym == 'F') {
+                m_spectatorRevealAll = !m_spectatorRevealAll;
+                m_soundSystem.playSFX(SFXType::UIClick);
+                return;
+            }
+            if (keySym == 'w' || keySym == 'W') {
+                m_camera.pan(0.0f, -40.0f);
+                return;
+            }
+            if (keySym == 's' || keySym == 'S') {
+                m_camera.pan(0.0f, 40.0f);
+                return;
+            }
+            if (keySym == 'a' || keySym == 'A') {
+                m_camera.pan(-40.0f, 0.0f);
+                return;
+            }
+            if (keySym == 'd' || keySym == 'D') {
+                m_camera.pan(40.0f, 0.0f);
+                return;
+            }
+            if (keySym == 'r' || keySym == 'R') {
+                m_camera.centerOnCell(m_map.getWidth() / 2, m_map.getHeight() / 2,
+                                      m_map.getWidth(), m_map.getHeight());
+                return;
+            }
+            if (keySym == '+' || keySym == '=') {
+                m_camera.zoomBy(1.15f, m_windowWidth * 0.5f, m_windowHeight * 0.5f);
+                return;
+            }
+            if (keySym == '-' || keySym == '_') {
+                m_camera.zoomBy(0.85f, m_windowWidth * 0.5f, m_windowHeight * 0.5f);
+                return;
+            }
+            if (keySym == 'q' || keySym == 'Q') {
+                returnToMainMenu();
+                return;
+            }
             return;
         }
-        if (keySym == 13 || keySym == 10 || keySym == 32) { // Enter o Espacio -> Reintentar Génesis
-            m_gameState = GameState::WorldCreation;
-            m_activeInputField = 0;
-            m_gameOverTriggered = false;
-            m_gameOverTimer = 0.0f;
+
+        // EN: V or M key opens spectator map view from Game Over screen
+        // ES: Tecla V o M abre la vista de espectador del mapa desde la pantalla de derrota
+        if (keySym == 'v' || keySym == 'V' || keySym == 'm' || keySym == 'M') {
+            m_isSpectatingPostDefeat = true;
+            m_soundSystem.playSFX(SFXType::UIClick);
+            return;
+        }
+        if (keySym == 27) { // ESC -> Salir al menú principal con panorama fresco
+            returnToMainMenu();
+            return;
+        }
+        if (keySym == 13 || keySym == 10 || keySym == 32) { // Enter o Espacio -> Reintentar Génesis con nueva semilla
+            prepareForWorldCreation(true);
             return;
         }
         return;
@@ -1170,8 +1903,7 @@ void Game::onKeyPress(int keySym) {
 
     if (m_gameState == GameState::WorldCreation) {
         if (keySym == 27) { // ESC -> Salir al menú
-            m_gameState = GameState::MainMenu;
-            m_activeInputField = 0;
+            returnToMainMenu();
             return;
         }
         if (keySym == 13 || keySym == 10 || keySym == 32) { // Enter
@@ -1220,7 +1952,7 @@ void Game::onKeyPress(int keySym) {
 
     if (m_gameState == GameState::LoadWorldMenu) {
         if (keySym == 27) { // ESC -> Volver al menú
-            m_gameState = GameState::MainMenu;
+            returnToMainMenu();
             return;
         }
         if (keySym == 13 || keySym == 10) { // Enter -> Jugar mundo
@@ -1233,9 +1965,120 @@ void Game::onKeyPress(int keySym) {
         return;
     }
 
+    if (m_gameState == GameState::MapEditor) {
+        // EN: TAB or V key switches between 2D Cartographic and 2.5D Isometric view
+        // ES: Tecla TAB o V alterna entre Vista Cartográfica 2D e Isométrica 2.5D
+        if (keySym == 9 || keySym == 65289 || keySym == 'v' || keySym == 'V') {
+            if (m_mapEditorConfig.viewMode == MapEditorViewMode::Cartographic2D) {
+                m_mapEditorConfig.viewMode = MapEditorViewMode::Isometric25D;
+                m_camera.reset(m_editorMap.getWidth(), m_editorMap.getHeight());
+                m_camera.centerOnCell(m_editorMap.getWidth() / 2, m_editorMap.getHeight() / 2,
+                                      m_editorMap.getWidth(), m_editorMap.getHeight());
+                m_camera.setZoom(1.0f);
+            } else {
+                m_mapEditorConfig.viewMode = MapEditorViewMode::Cartographic2D;
+            }
+            m_soundSystem.playSFX(SFXType::UIClick);
+            return;
+        }
+
+        if (keySym == 27) { // ESC
+            if (m_mapEditorConfig.viewMode == MapEditorViewMode::Isometric25D) {
+                m_mapEditorConfig.viewMode = MapEditorViewMode::Cartographic2D;
+                m_soundSystem.playSFX(SFXType::UIClick);
+            } else {
+                returnToMainMenu();
+            }
+            return;
+        }
+
+        if (m_activeInputField == 807) { // Semilla del mapa
+            if (keySym == 8) { // Backspace
+                m_mapEditorConfig.mapSeed /= 10;
+            } else if (keySym >= '0' && keySym <= '9') {
+                m_mapEditorConfig.mapSeed = m_mapEditorConfig.mapSeed * 10 + (keySym - '0');
+            } else if (keySym == 13 || keySym == 10) { // Enter para aplicar y regenerar
+                m_activeInputField = 0;
+                regenerateEditorMap();
+            }
+            return;
+        }
+
+        if (m_mapEditorConfig.viewMode == MapEditorViewMode::Isometric25D) {
+            // EN: Free camera navigation with WASD / Arrow keys
+            // ES: Navegación de cámara libre con WASD o flechas
+            constexpr float panStep = 50.0f;
+            if (keySym == 'w' || keySym == 'W' || keySym == 65362) {
+                m_camera.pan(0.0f, -panStep);
+                return;
+            } else if (keySym == 's' || keySym == 'S' || keySym == 65364) {
+                m_camera.pan(0.0f, panStep);
+                return;
+            } else if (keySym == 'a' || keySym == 'A' || keySym == 65361) {
+                m_camera.pan(-panStep, 0.0f);
+                return;
+            } else if (keySym == 'd' || keySym == 'D' || keySym == 65363) {
+                m_camera.pan(panStep, 0.0f);
+                return;
+            } else if (keySym == 'r' || keySym == 'R') {
+                m_camera.centerOnCell(m_editorMap.getWidth() / 2, m_editorMap.getHeight() / 2,
+                                      m_editorMap.getWidth(), m_editorMap.getHeight());
+                return;
+            } else if (keySym == '+' || keySym == '=') {
+                m_camera.zoomBy(1.20f, m_mouseX, m_mouseY);
+                return;
+            } else if (keySym == '-' || keySym == '_') {
+                m_camera.zoomBy(0.80f, m_mouseX, m_mouseY);
+                return;
+            }
+        }
+
+        if (keySym == 13 || keySym == 10) { // Enter -> Jugar este mapa
+            startPlayWithEditorMap();
+            return;
+        }
+        return;
+    }
+
+    if (m_gameState == GameState::Tutorial) {
+        // EN: Escape returns cleanly to the main menu
+        // ES: Escape regresa limpiamente al menú principal
+        if (keySym == 27) {
+            returnToMainMenu();
+            return;
+        }
+        // EN: Arrow keys and A/D switch between tabs
+        // ES: Teclas de flecha y A/D cambian entre pestañas
+        if (keySym == 65361 || keySym == 'a' || keySym == 'A') { // Flecha Izquierda / A -> Pestaña anterior
+            const int currentTabIndex = static_cast<int>(m_currentTutorialTab);
+            if (currentTabIndex > 0) {
+                m_currentTutorialTab = static_cast<TutorialTab>(currentTabIndex - 1);
+                m_soundSystem.playSFX(SFXType::UIClick);
+            }
+            return;
+        }
+        if (keySym == 65363 || keySym == 'd' || keySym == 'D') { // Flecha Derecha / D -> Pestaña siguiente
+            const int currentTabIndex = static_cast<int>(m_currentTutorialTab);
+            if (currentTabIndex + 1 < static_cast<int>(TutorialTab::Count)) {
+                m_currentTutorialTab = static_cast<TutorialTab>(currentTabIndex + 1);
+                m_soundSystem.playSFX(SFXType::UIClick);
+            }
+            return;
+        }
+        // EN: Direct number keys 1-4 jump to corresponding category tab
+        // ES: Teclas numéricas directas 1-4 saltan a la pestaña de categoría correspondiente
+        if (keySym >= '1' && keySym <= '4') {
+            m_currentTutorialTab = static_cast<TutorialTab>(keySym - '1');
+            m_soundSystem.playSFX(SFXType::UIClick);
+            return;
+        }
+        return;
+    }
+
     if (m_gameState == GameState::Options) {
-        if (keySym == 27) { // ESC -> Volver al menú principal
-            m_gameState = GameState::MainMenu;
+        if (keySym == 27) { // ESC -> Guardar opciones y volver
+            saveSettings();
+            m_gameState = m_previousGameState;
             return;
         }
     } else if (m_gameState == GameState::MainMenu) {
@@ -1375,6 +2218,7 @@ void Game::onKeyPress(int keySym) {
         case 32: // Space
             m_timeEngine.togglePause();
             m_timeline.togglePause();
+            m_renderer.triggerButtonPress(201);
             break;
         case '1': m_mapMode = RenderMapMode::ReligionDominance; break;
         case '2': m_mapMode = RenderMapMode::TerrainBiomes; break;
@@ -1418,9 +2262,26 @@ void Game::onKeyPress(int keySym) {
         case 'f': case 'F':
             toggleDivinePowerTargeting(DivinePowerType::Wildfire);
             break;
+        case 'l': case 'L':
+            toggleDivinePowerTargeting(DivinePowerType::Rain);
+            break;
+        case 'j': case 'J':
+            toggleDivinePowerTargeting(DivinePowerType::Deluge);
+            break;
+        case 'o': case 'O':
+            // EN: Hotkey 'O' toggles Atomic Bomb cheat targeting mode / ES: Tecla 'O' activa modo apuntar del truco Bomba Atómica
+            toggleDivinePowerTargeting(DivinePowerType::AtomicBomb);
+            break;
         case 'u': case 'U':
             m_soundSystem.toggleMute();
             showFeedback(m_soundSystem.isMuted() ? "AUDIO: SILENCIADO [Mute]" : "AUDIO: ACTIVADO", 2.5f);
+            break;
+        case 'h': case 'H':
+            // EN: Hotkey 'H' toggles terrain isometric grid overlay
+            // ES: Tecla 'H' conmuta la capa de retícula isométrica de terreno
+            m_settings.toggleIsometricGrid();
+            applySettings(m_settings);
+            showFeedback(m_renderer.isGridVisible() ? "RETICULA DE TERRENO: VISIBLE [H]" : "RETICULA DE TERRENO: OCULTA [H]", 2.5f);
             break;
         case '[': {
             const float newVolume = std::max(0.0f, m_soundSystem.getMasterVolume() - 0.10f);
@@ -1442,7 +2303,7 @@ void Game::onKeyPress(int keySym) {
                 break;
             }
             saveCurrentGame();
-            m_gameState = GameState::MainMenu;
+            returnToMainMenu();
             break;
         default: break;
     }
@@ -1512,14 +2373,227 @@ void Game::executeCommand(const std::string& rawCmd) {
     } else if (cmd == "INCENDIO" || cmd == "FUEGO" || cmd == "WILDFIRE" || cmd == "FIRE") {
         toggleDivinePowerTargeting(DivinePowerType::Wildfire);
         showFeedback("MODO APUNTAR: INCENDIO FORESTAL ACTIVADO", 4.0f);
+    } else if (cmd == "LLUVIA" || cmd == "RAIN") {
+        toggleDivinePowerTargeting(DivinePowerType::Rain);
+        showFeedback("MODO APUNTAR: LLUVIA BENDITA ACTIVADA", 4.0f);
+    } else if (cmd == "DILUVIO" || cmd == "DELUGE" || cmd == "FLOOD" || cmd == "INUNDACION") {
+        toggleDivinePowerTargeting(DivinePowerType::Deluge);
+        showFeedback("MODO APUNTAR: GRAN DILUVIO CATACLÍSMICO ACTIVADO", 4.0f);
+    } else if (cmd == "FUCKINGBOMB" || cmd == "ATOMICBOMB" || cmd == "NUKE" || cmd == "BOMBA" || cmd == "ATOMICA") {
+        // EN: Secret apocalyptic nuclear cheat command / ES: Comando truco apocalíptico nuclear secreto
+        toggleDivinePowerTargeting(DivinePowerType::AtomicBomb);
+        showFeedback("¡TRUCO ACTIVADO! MODO APUNTAR: EXPLOSION ATOMICA [FUCKINGBOMB] (0 Fe)", 5.0f);
     } else if (cmd == "MUTE" || cmd == "SILENCIO") {
         m_soundSystem.toggleMute();
         showFeedback(m_soundSystem.isMuted() ? "AUDIO: SILENCIADO [Mute]" : "AUDIO: ACTIVADO", 4.0f);
+    } else if (cmd == "GRID" || cmd == "RETICULA" || cmd == "CUADRICULA") {
+        // EN: Toggle terrain isometric grid visualization command
+        // ES: Comando para alternar la visualización de la retícula isométrica de terreno
+        m_settings.toggleIsometricGrid();
+        applySettings(m_settings);
+        showFeedback(m_renderer.isGridVisible()
+                         ? "RETICULA DE TERRENO: VISIBLE [H]"
+                         : "RETICULA DE TERRENO: OCULTA [H]",
+                     4.0f);
+    } else if (cmd == "DEV" || cmd == "DEVELOPER" || cmd == "DEBUG" || cmd == "DESARROLLADOR") {
+        // EN: Toggle developer mode telemetry and axes overlay
+        // ES: Comando para alternar telemetría y ejes del modo desarrollador
+        toggleDeveloperMode();
     } else if (cmd == "SONIDO" || cmd == "AUDIO") {
         showFeedback("DISPOSITIVO DE SONIDO: " + m_soundSystem.getDeviceName() + " | VOL: " +
                      std::to_string(static_cast<int>(m_soundSystem.getMasterVolume() * 100)) + "%", 4.0f);
+    } else if (cmd == "BORRACHO" || cmd == "DRUNK") {
+        // EN: Drunk villager condition cheat command
+        // ES: Comando truco de condición aldeano borracho
+        Humano* selectedVillager = m_gestorHumanos.getHumanoSeleccionadoMutable();
+        if (selectedVillager && selectedVillager->estaVivo()) {
+            selectedVillager->resetConditions();
+            selectedVillager->consumeAlcohol(80.0f);
+            showFeedback("ESTADO MODIFICADO: " + selectedVillager->getNombre() + " -> [BORRACHO] (Alcohol 80%)", 4.0f);
+        } else {
+            for (auto& villager : m_gestorHumanos.getHumanos()) {
+                if (villager.estaVivo() && villager.getReligionId() == 1) {
+                    villager.resetConditions();
+                    villager.consumeAlcohol(80.0f);
+                }
+            }
+            showFeedback("ESTADO MODIFICADO: Aldeanos de la tribu -> [BORRACHO] (Alcohol 80%)", 4.0f);
+        }
+    } else if (cmd == "HAMBRIENTO" || cmd == "HUNGRY") {
+        // EN: Hungry villager condition cheat command
+        // ES: Comando truco de condición aldeano hambriento
+        Humano* selectedVillager = m_gestorHumanos.getHumanoSeleccionadoMutable();
+        if (selectedVillager && selectedVillager->estaVivo()) {
+            selectedVillager->resetConditions();
+            selectedVillager->getHumanUnitMutable().nutritionalState = 12.0f;
+            selectedVillager->getPopGroupMutable().foodSupply = 10.0f;
+            showFeedback("ESTADO MODIFICADO: " + selectedVillager->getNombre() + " -> [HAMBRIENTO]", 4.0f);
+        } else {
+            for (auto& villager : m_gestorHumanos.getHumanos()) {
+                if (villager.estaVivo() && villager.getReligionId() == 1) {
+                    villager.resetConditions();
+                    villager.getHumanUnitMutable().nutritionalState = 12.0f;
+                    villager.getPopGroupMutable().foodSupply = 10.0f;
+                }
+            }
+            showFeedback("ESTADO MODIFICADO: Aldeanos de la tribu -> [HAMBRIENTO]", 4.0f);
+        }
+    } else if (cmd == "ENFERMO" || cmd == "SICK") {
+        // EN: Sick villager condition cheat command
+        // ES: Comando truco de condición aldeano enfermo
+        Humano* selectedVillager = m_gestorHumanos.getHumanoSeleccionadoMutable();
+        if (selectedVillager && selectedVillager->estaVivo()) {
+            selectedVillager->resetConditions();
+            selectedVillager->infectWithPandemic(30.0f);
+            showFeedback("ESTADO MODIFICADO: " + selectedVillager->getNombre() + " -> [ENFERMO]", 4.0f);
+        } else {
+            for (auto& villager : m_gestorHumanos.getHumanos()) {
+                if (villager.estaVivo() && villager.getReligionId() == 1) {
+                    villager.resetConditions();
+                    villager.infectWithPandemic(30.0f);
+                }
+            }
+            showFeedback("ESTADO MODIFICADO: Aldeanos de la tribu -> [ENFERMO]", 4.0f);
+        }
+    } else if (cmd == "LLENO" || cmd == "FULL" || cmd == "SACIADO") {
+        // EN: Full villager condition cheat command
+        // ES: Comando truco de condición aldeano lleno/saciado
+        Humano* selectedVillager = m_gestorHumanos.getHumanoSeleccionadoMutable();
+        if (selectedVillager && selectedVillager->estaVivo()) {
+            selectedVillager->resetConditions();
+            selectedVillager->getHumanUnitMutable().nutritionalState = 100.0f;
+            selectedVillager->getPopGroupMutable().foodSupply = 100.0f;
+            selectedVillager->setEnergia(100.0f);
+            showFeedback("ESTADO MODIFICADO: " + selectedVillager->getNombre() + " -> [LLENO]", 4.0f);
+        } else {
+            for (auto& villager : m_gestorHumanos.getHumanos()) {
+                if (villager.estaVivo() && villager.getReligionId() == 1) {
+                    villager.resetConditions();
+                    villager.getHumanUnitMutable().nutritionalState = 100.0f;
+                    villager.getPopGroupMutable().foodSupply = 100.0f;
+                    villager.setEnergia(100.0f);
+                }
+            }
+            showFeedback("ESTADO MODIFICADO: Aldeanos de la tribu -> [LLENO]", 4.0f);
+        }
+    } else if (cmd == "AGRESIVO" || cmd == "AGGRESSIVE" || cmd == "FURIA") {
+        // EN: Aggressive villager condition cheat command
+        // ES: Comando truco de condición aldeano agresivo
+        Humano* selectedVillager = m_gestorHumanos.getHumanoSeleccionadoMutable();
+        if (selectedVillager && selectedVillager->estaVivo()) {
+            selectedVillager->resetConditions();
+            selectedVillager->provokeAggression(90.0f);
+            selectedVillager->activarFuriaProtectora(15.0f);
+            showFeedback("ESTADO MODIFICADO: " + selectedVillager->getNombre() + " -> [AGRESIVO] (+35% Danio)", 4.0f);
+        } else {
+            for (auto& villager : m_gestorHumanos.getHumanos()) {
+                if (villager.estaVivo() && villager.getReligionId() == 1) {
+                    villager.resetConditions();
+                    villager.provokeAggression(90.0f);
+                    villager.activarFuriaProtectora(15.0f);
+                }
+            }
+            showFeedback("ESTADO MODIFICADO: Aldeanos de la tribu -> [AGRESIVO] (+35% Danio)", 4.0f);
+        }
+    } else if (cmd == "ASUSTADO" || cmd == "SCARED" || cmd == "PANICO") {
+        // EN: Scared villager condition cheat command
+        // ES: Comando truco de condición aldeano asustado
+        Humano* selectedVillager = m_gestorHumanos.getHumanoSeleccionadoMutable();
+        if (selectedVillager && selectedVillager->estaVivo()) {
+            selectedVillager->resetConditions();
+            selectedVillager->huirEnPanicoDesde(selectedVillager->getX() + 0.5f, selectedVillager->getY() + 0.5f, 4.0f);
+            showFeedback("ESTADO MODIFICADO: " + selectedVillager->getNombre() + " -> [ASUSTADO]", 4.0f);
+        } else {
+            for (auto& villager : m_gestorHumanos.getHumanos()) {
+                if (villager.estaVivo() && villager.getReligionId() == 1) {
+                    villager.resetConditions();
+                    villager.huirEnPanicoDesde(villager.getX() + 0.5f, villager.getY() + 0.5f, 4.0f);
+                }
+            }
+            showFeedback("ESTADO MODIFICADO: Aldeanos de la tribu -> [ASUSTADO]", 4.0f);
+        }
+    } else if (cmd == "SANO" || cmd == "HEALTHY" || cmd == "CURAR") {
+        // EN: Healthy villager condition cheat command
+        // ES: Comando truco de condición aldeano sano
+        Humano* selectedVillager = m_gestorHumanos.getHumanoSeleccionadoMutable();
+        if (selectedVillager && selectedVillager->estaVivo()) {
+            selectedVillager->resetConditions();
+            selectedVillager->curar(100.0f);
+            selectedVillager->getHumanUnitMutable().nutritionalState = 65.0f;
+            selectedVillager->getPopGroupMutable().foodSupply = 65.0f;
+            selectedVillager->setEnergia(100.0f);
+            showFeedback("ESTADO MODIFICADO: " + selectedVillager->getNombre() + " -> [SANO]", 4.0f);
+        } else {
+            for (auto& villager : m_gestorHumanos.getHumanos()) {
+                if (villager.estaVivo() && villager.getReligionId() == 1) {
+                    villager.resetConditions();
+                    villager.curar(100.0f);
+                    villager.getHumanUnitMutable().nutritionalState = 65.0f;
+                    villager.getPopGroupMutable().foodSupply = 65.0f;
+                    villager.setEnergia(100.0f);
+                }
+            }
+            showFeedback("ESTADO MODIFICADO: Aldeanos de la tribu -> [SANO]", 4.0f);
+        }
+    } else if (cmd == "EXHAUSTO" || cmd == "EXHAUSTED") {
+        // EN: Exhausted villager condition cheat command
+        // ES: Comando truco de condición aldeano exhausto
+        Humano* selectedVillager = m_gestorHumanos.getHumanoSeleccionadoMutable();
+        if (selectedVillager && selectedVillager->estaVivo()) {
+            selectedVillager->resetConditions();
+            selectedVillager->setEnergia(5.0f);
+            selectedVillager->setSueno(95.0f);
+            showFeedback("ESTADO MODIFICADO: " + selectedVillager->getNombre() + " -> [EXHAUSTO]", 4.0f);
+        } else {
+            for (auto& villager : m_gestorHumanos.getHumanos()) {
+                if (villager.estaVivo() && villager.getReligionId() == 1) {
+                    villager.resetConditions();
+                    villager.setEnergia(5.0f);
+                    villager.setSueno(95.0f);
+                }
+            }
+            showFeedback("ESTADO MODIFICADO: Aldeanos de la tribu -> [EXHAUSTO]", 4.0f);
+        }
+    } else if (cmd == "INSPIRADO" || cmd == "INSPIRED") {
+        // EN: Inspired villager condition cheat command
+        // ES: Comando truco de condición aldeano inspirado
+        Humano* selectedVillager = m_gestorHumanos.getHumanoSeleccionadoMutable();
+        if (selectedVillager && selectedVillager->estaVivo()) {
+            selectedVillager->resetConditions();
+            selectedVillager->activarSenalDivina(25.0f);
+            selectedVillager->setDevocion(1.0f);
+            showFeedback("ESTADO MODIFICADO: " + selectedVillager->getNombre() + " -> [INSPIRADO]", 4.0f);
+        } else {
+            for (auto& villager : m_gestorHumanos.getHumanos()) {
+                if (villager.estaVivo() && villager.getReligionId() == 1) {
+                    villager.resetConditions();
+                    villager.activarSenalDivina(25.0f);
+                    villager.setDevocion(1.0f);
+                }
+            }
+            showFeedback("ESTADO MODIFICADO: Aldeanos de la tribu -> [INSPIRADO]", 4.0f);
+        }
+    } else if (cmd == "HERIDO" || cmd == "INJURED") {
+        // EN: Injured villager condition cheat command
+        // ES: Comando truco de condición aldeano herido
+        Humano* selectedVillager = m_gestorHumanos.getHumanoSeleccionadoMutable();
+        if (selectedVillager && selectedVillager->estaVivo()) {
+            selectedVillager->resetConditions();
+            selectedVillager->setSalud(25.0f);
+            selectedVillager->getHumanUnitMutable().hitPoints = 25.0f;
+            showFeedback("ESTADO MODIFICADO: " + selectedVillager->getNombre() + " -> [HERIDO]", 4.0f);
+        } else {
+            for (auto& villager : m_gestorHumanos.getHumanos()) {
+                if (villager.estaVivo() && villager.getReligionId() == 1) {
+                    villager.resetConditions();
+                    villager.setSalud(25.0f);
+                    villager.getHumanUnitMutable().hitPoints = 25.0f;
+                }
+            }
+            showFeedback("ESTADO MODIFICADO: Aldeanos de la tribu -> [HERIDO]", 4.0f);
+        }
     } else {
-        showFeedback("COMANDO DESCONOCIDO: '" + cmd + "' (USA: SELECTOR | LUMINUS | DIA | NOCHE | AMANECER | ATARDECER | METEORITO | VOLCAN | MUTE | AUDIO)", 4.0f);
+        showFeedback("COMANDO DESCONOCIDO: '" + cmd + "' (USA: SELECTOR | LUMINUS | DIA | NOCHE | AMANECER | ATARDECER | METEORITO | VOLCAN | FUCKINGBOMB | MUTE | BORRACHO | HAMBRIENTO | ENFERMO | SANO | LLENO | AGRESIVO | ASUSTADO)", 4.0f);
     }
 }
 
@@ -1658,6 +2732,10 @@ void Game::handleX11Events() {
 
                 if (ks == XK_Escape) {
                     onKeyPress(27);
+                } else if (ks == XK_F11) {
+                    onKeyPress(1011);
+                } else if (ks == XK_F3) {
+                    onKeyPress(1003);
                 } else if (ks == XK_Return || ks == XK_KP_Enter) {
                     onKeyPress(13);
                 } else if (ks == XK_BackSpace) {
@@ -1686,7 +2764,13 @@ void Game::handleX11Events() {
                 break;
             }
             case ClientMessage: {
-                m_isRunning = false;
+                // EN: Intercept window close event (WM_DELETE_WINDOW)
+                // ES: Interceptar evento de cierre de ventana (WM_DELETE_WINDOW)
+                Atom wmProtocols = XInternAtom(dpy, "WM_PROTOCOLS", False);
+                Atom wmDelete = XInternAtom(dpy, "WM_DELETE_WINDOW", False);
+                if (ev.xclient.message_type == wmProtocols && static_cast<Atom>(ev.xclient.data.l[0]) == wmDelete) {
+                    m_isRunning = false;
+                }
                 break;
             }
             default:
@@ -1786,9 +2870,190 @@ void Game::performEmergencyMemoryPurge() {
               << postPurgeMemoryMb << " MB." << std::endl;
 }
 
+// =============================================================================
+// EN: Setup living simulated world panorama for the Minecraft-inspired main menu
+// ES: Configurar panorama de mundo simulado vivo para la pantalla principal inspirada en Minecraft
+// =============================================================================
+void Game::setupMenuPanoramaWorld() {
+    constexpr int panoramaMapDimension = 64;
+    constexpr uint32_t panoramaScenicSeed = 3477892567U; // Semilla escénica con valles fértiles, ríos y costas
+
+    m_map = WorldMap(panoramaMapDimension, panoramaMapDimension);
+    m_map.generateProceduralWorld(panoramaScenicSeed, WorldClimate::Templado, ResourceAbundance::Abundante);
+    m_cloudSystem.reset(panoramaMapDimension, panoramaMapDimension);
+    m_renderer.setCloudSystem(&m_cloudSystem);
+
+    m_registry = ReligionRegistry{};
+    m_timeline.reset(-4000, 2200);
+    m_dayNightCycle.resetDaysPassed();
+    m_timeline.setYearsPerSecond(4.0f);
+    m_timeEngine.reset(-4000);
+
+    // EN: Seed diverse religions across the panorama world
+    // ES: Sembrar diversas religiones en el mundo del panorama
+    m_registry.createPrimordialReligion("Culto del Fuego Solar", "Solarius", ColorRGB{230, 161, 59}, "Sun", -4000);
+    m_registry.createPrimordialReligion("Animist Gaia-Cult", "Gaia", ColorRGB{46, 204, 113}, "Tree", -4000);
+    m_registry.createPrimordialReligion("The Sacred Monad", "Monas", ColorRGB{52, 152, 219}, "Spiral", -4000);
+    m_registry.createPrimordialReligion("Order of the Eternal Flame", "Ignis", ColorRGB{128, 0, 32}, "Flame", -4000);
+    m_registry.createPrimordialReligion("Wheel of the Star-Dharma", "Dharma", ColorRGB{155, 89, 182}, "Wheel", -4000);
+
+    // EN: Generate pueblos, holy shrines and tribal shelters
+    // ES: Generar pueblos, santuarios sagrados y refugios tribales
+    std::vector<Point2i> puebloLocations = m_map.generatePuebloLocations(5, panoramaScenicSeed);
+
+    if (!puebloLocations.empty()) {
+        const Point2i& centerPueblo = puebloLocations[0];
+        m_map.consecrateHolySite(centerPueblo.x, centerPueblo.y, "Gran Templo de Solarius");
+        if (m_map.isValid(centerPueblo.x, centerPueblo.y)) {
+            m_map.getCell(centerPueblo.x, centerPueblo.y).shrineLevel = 3;
+            m_map.getCell(centerPueblo.x, centerPueblo.y).setShare(1, 0.95f);
+        }
+        for (size_t i = 1; i < puebloLocations.size(); ++i) {
+            const Point2i& p = puebloLocations[i];
+            m_map.consecrateHolySite(p.x, p.y, "Santuario Ancestral");
+            if (m_map.isValid(p.x, p.y)) {
+                m_map.getCell(p.x, p.y).shrineLevel = 2;
+                m_map.getCell(p.x, p.y).setShare(static_cast<int>(i + 1), 0.90f);
+            }
+        }
+
+        // EN: Construct tribal huts in valid non-water neighboring plots around center pueblo
+        // ES: Construir chozas tribales en parcelas vecinas no acuáticas válidas alrededor del pueblo central
+        int housesBuilt = 0;
+        for (const auto& neighborPoint : m_map.getNeighbors(centerPueblo.x, centerPueblo.y, true)) {
+            if (housesBuilt >= 3) break;
+            if (!m_map.isValid(neighborPoint.x, neighborPoint.y)) continue;
+            const Cell& neighborCell = m_map.getCell(neighborPoint.x, neighborPoint.y);
+            if (neighborCell.isWater() || neighborCell.hasHouse || neighborCell.hasHolySite) continue;
+
+            const HouseType houseType = (housesBuilt == 2) ? HouseType::ChieftainLonghouse : HouseType::ThatchedHut;
+            const int houseId = m_buildingSystem.initiateHouseConstruction(neighborPoint.x, neighborPoint.y, 0, 0, 1, houseType, m_map);
+            if (House* targetHouse = m_buildingSystem.getHouseByIdMutable(houseId)) {
+                targetHouse->buildProgress = 100.0f;
+                ++housesBuilt;
+            }
+        }
+    }
+
+    // EN: Populate the world with living autonomous villagers
+    // ES: Poblar el mundo con aldeanos autónomos vivos
+    m_gestorHumanos.getHumanos().clear();
+    m_gestorHumanos.inicializarPoblacion(m_map, m_registry, 36);
+
+    // EN: Set bright golden dawn/morning atmospheric lighting
+    // ES: Establecer iluminación atmosférica dorada de amanecer/mañana
+    m_dayNightCycle.setTimeByHour(8.5f);
+    m_dayNightCycle.setPaused(false);
+
+    // EN: Position camera centered on the village with cinematic zoom
+    // ES: Posicionar cámara centrada en la aldea con zoom cinemático
+    if (!puebloLocations.empty()) {
+        m_camera.centerOnCell(puebloLocations[0].x, puebloLocations[0].y, panoramaMapDimension, panoramaMapDimension);
+    } else {
+        m_camera.centerOnCell(panoramaMapDimension / 2, panoramaMapDimension / 2, panoramaMapDimension, panoramaMapDimension);
+    }
+    m_camera.setZoom(1.15f);
+
+    m_menuPanoramaTime = 0.0f;
+    m_menuPanoramaInitialized = true;
+}
+
+// =============================================================================
+// EN: Convert map size configuration index into grid width and height (starts at 64x64)
+// ES: Convertir índice de configuración de tamaño de mapa a ancho y alto de cuadrícula (inicia en 64x64)
+// =============================================================================
+int Game::getMapDimensionFromIndex(int index) {
+    switch (index) {
+        case 0: return 64;   // Pequeño (64x64, 320m x 320m)
+        case 1: return 80;   // Mediano (80x80, 400m x 400m)
+        case 2: return 96;   // Grande (96x96, 480m x 480m)
+        case 3: return 128;  // Enorme (128x128, 640m x 640m)
+        case 4: return 160;  // Inmenso (160x160, 800m x 800m)
+        case 5: return 200;  // Colosal (200x200, 1000m x 1000m / 1.0 km²)
+        case 6: return 256;  // Titánico (256x256, 1280m x 1280m / 1.28 km)
+        case 7: return 320;  // Planetario (320x320, 1600m x 1600m / 1.6 km)
+        default: return 128; // Enorme por defecto (128x128)
+    }
+}
+
+// =============================================================================
+// EN: Generate a high-entropy seed using random_device and high-resolution timer
+// ES: Generar una semilla de alta entropía usando random_device y temporizador de alta resolución
+// =============================================================================
+uint32_t Game::generateUniqueSeed() {
+    std::random_device randomDevice;
+    uint32_t seedValue = randomDevice();
+    auto timestamp = static_cast<uint32_t>(std::chrono::high_resolution_clock::now().time_since_epoch().count());
+    seedValue ^= (timestamp + 0x9e3779b9 + (seedValue << 6) + (seedValue >> 2));
+    if (seedValue == 0) seedValue = 123456789U;
+    return seedValue;
+}
+
+// =============================================================================
+// EN: Reset all game subsystems to eliminate cross-session data leakage
+// ES: Reiniciar todos los subsistemas del juego para eliminar fugas de datos entre partidas
+// =============================================================================
+void Game::resetAllGameSubsystems() {
+    m_gestorHumanos.getHumanos().clear();
+    m_buildingSystem.clear();
+    m_eventLine.clear();
+    m_divinePowers.clearAllFX();
+    m_moralitySystem.clear();
+    m_nemesisSififus.clear();
+    m_activeDivinePower = DivinePowerType::Inactive;
+    m_renderer.setActiveDivinePower(DivinePowerType::Inactive);
+
+    m_gameOverTriggered = false;
+    m_gameOverTimer = 0.0f;
+    m_chronicleOpen = false;
+    m_commandBoxOpen = false;
+    m_commandInput.clear();
+    m_commandFeedback.clear();
+    m_commandFeedbackTimer = 0.0f;
+    m_cheatSelectorActive = false;
+    m_cheatLuminusActive = false;
+}
+
+// =============================================================================
+// EN: Prepare game state for custom world creation with a fresh unique seed
+// ES: Preparar el estado de juego para crear un mundo personalizado con semilla única fresca
+// =============================================================================
+void Game::prepareForWorldCreation(bool generateNewSeed) {
+    if (generateNewSeed) {
+        m_creationConfig.mapSeed = generateUniqueSeed();
+    }
+    m_isSpectatingPostDefeat = false;
+    m_spectatorRevealAll = true;
+    m_activeInputField = 0;
+    m_gameState = GameState::WorldCreation;
+}
+
+// =============================================================================
+// EN: Return to Main Menu with a fresh, living simulated panorama background
+// ES: Regresar al Menú Principal con un panorama simulado vivo y fresco de fondo
+// =============================================================================
+void Game::returnToMainMenu() {
+    m_isSpectatingPostDefeat = false;
+    m_spectatorRevealAll = true;
+    m_gameOverTriggered = false;
+    m_gameOverTimer = 0.0f;
+    m_activeInputField = 0;
+    setupMenuPanoramaWorld();
+    m_gameState = GameState::MainMenu;
+}
+
 void Game::startNewCustomWorld() {
+    // EN: Purge previous subsystems to ensure clean slate without lingering data
+    // ES: Purgar subsistemas previos para asegurar un estado limpio sin datos residuales
+    resetAllGameSubsystems();
+
+    // EN: Generate unique isolated save slot for this playthrough
+    // ES: Generar espacio de guardado aislado único para esta partida
+    m_currentSaveSlot = SaveSystem::generateUniqueSlotName(m_creationConfig.godName, m_creationConfig.mapSeed);
+
     std::cout << "==========================================================" << std::endl;
     std::cout << "[Génesis] Creando nuevo mundo sagrado personalizado..." << std::endl;
+    std::cout << "  - Espacio de Partida: " << m_currentSaveSlot << std::endl;
     std::cout << "  - Dios Guía: " << m_creationConfig.godName << std::endl;
     std::cout << "  - Religión Elegida: " << m_creationConfig.religionName << std::endl;
     std::cout << "  - Semilla (Seed): " << m_creationConfig.mapSeed << std::endl;
@@ -1799,11 +3064,13 @@ void Game::startNewCustomWorld() {
     std::cout << "==========================================================" << std::endl;
 
     // 1. Determinar tamaño de mapa y generar geografía procedimental adaptada al Clima y Abundancia elegidos
-    int mapDim = (m_creationConfig.mapSizeIndex == 0) ? 32 : (m_creationConfig.mapSizeIndex == 2 ? 64 : 48);
+    const int mapDim = getMapDimensionFromIndex(m_creationConfig.mapSizeIndex);
     m_map = WorldMap(mapDim, mapDim);
     m_map.generateProceduralWorld(m_creationConfig.mapSeed, m_creationConfig.worldClimate, m_creationConfig.resourceAbundance);
     m_cloudSystem.reset(mapDim, mapDim);
     m_renderer.setCloudSystem(&m_cloudSystem);
+    m_fog.reset(mapDim, mapDim);
+    ErrorSystem::instance().setMaxSafeEntities(std::max(450u, static_cast<uint32_t>(mapDim * 4)));
 
     // EN: Reset cell populations to 0 so instantiated living units increment counts 1:1
     // ES: Reiniciar la población de celdas a 0 para que cada aldeano real instanciado sume 1:1
@@ -1830,6 +3097,7 @@ void Game::startNewCustomWorld() {
 
     m_registry = ReligionRegistry{};
     m_timeline.reset(startYear, 2200);
+    m_dayNightCycle.resetDaysPassed();
     float yearsPerSec = (m_creationConfig.timePacing == TimePacing::Epico) ? 1.0f : ((m_creationConfig.timePacing == TimePacing::Dinamico) ? 12.0f : 4.0f);
     m_timeline.setYearsPerSecond(yearsPerSec);
     m_timeEngine.reset(startYear);
@@ -2007,95 +3275,90 @@ void Game::startNewCustomWorld() {
 }
 
 void Game::loadStateFromSave(const WorldMap& map, const ReligionRegistry& registry,
-                           int currentYear, const std::string& godName,
-                           const std::string& religionName, uint32_t seed) {
+                             int currentYear, const std::string& godName,
+                             const std::string& religionName, uint32_t seed,
+                             bool villagersLoadedFromSnapshot,
+                             float timeOfDay,
+                             const std::string& slotName,
+                             int daysPassed,
+                             int advancementBonusYears,
+                             int startYear) {
     m_map = map;
     m_registry = registry;
     m_creationConfig.godName = godName;
     m_creationConfig.religionName = religionName;
     m_creationConfig.mapSeed = seed;
 
-    m_timeline.reset(currentYear, 2200);
+    if (!slotName.empty()) {
+        m_currentSaveSlot = slotName;
+    } else if (m_currentSaveSlot.empty()) {
+        m_currentSaveSlot = SaveSystem::generateUniqueSlotName(godName, seed);
+    }
+
+    m_dayNightCycle.setTimeOfDay(timeOfDay);
+    m_dayNightCycle.setDaysPassed(daysPassed);
+
+    m_timeline.reset(startYear, 2200);
     m_timeline.setCurrentYear(currentYear);
+    m_timeline.setAdvancementBonusYears(advancementBonusYears);
     m_timeEngine.reset(currentYear);
 
     m_camera.reset(m_map.getWidth(), m_map.getHeight());
 
-    // EN: Normalize max population and cohesive elevations for saved games
-    // ES: Normalizar maxPopulation y elevaciones cohesivas para partidas guardadas
-    for (int cellY = 0; cellY < m_map.getHeight(); ++cellY) {
-        for (int cellX = 0; cellX < m_map.getWidth(); ++cellX) {
-            Cell& targetCell = m_map.getCell(cellX, cellY);
-            if (targetCell.isWater()) {
-                targetCell.elevation = 0.0f;
-            } else if (targetCell.biome == BiomeType::RuggedMountains) {
-                // EN: Convert ancient central gray slabs into habitable green hills
-                // ES: Convertir antiguas losas grises centrales en colinas verdes habitables
-                targetCell.biome = ((cellX + cellY) % 3 == 0) ? BiomeType::HighlandHills : BiomeType::FertileValley;
-                targetCell.elevation = (targetCell.biome == BiomeType::HighlandHills) ? 0.95f : 0.50f;
-                targetCell.maxPopulation = 6;
-            } else if (targetCell.biome == BiomeType::HighlandHills) {
-                targetCell.elevation = 0.95f;
-            } else {
-                targetCell.elevation = 0.50f;
-            }
-            if (targetCell.isHabitable() && targetCell.maxPopulation > 15) {
-                targetCell.maxPopulation = 6;
-            }
-        }
-    }
-
-    int totalSavedPop = m_map.getTotalWorldPopulation();
-    if (totalSavedPop > 250 || totalSavedPop <= 0) {
-        // EN: Migrate ancient saves (e.g. 600,000 pop) to 80 real 1:1 villagers to avoid collapse
-        // ES: Migrar partidas antiguas (ej. 600,000 hab) a 80 aldeanos reales 1:1 para evitar colapso
-        m_gestorHumanos.inicializarPoblacion(m_map, m_registry, 80);
+    if (villagersLoadedFromSnapshot) {
+        // EN: Villagers were already restored 1:1 with exact identities from villagers.dat
+        // ES: Los aldeanos ya fueron restaurados 1:1 con identidades exactas desde villagers.dat
+        m_gestorHumanos.actualizar(0.0f, m_map);
     } else {
-        // EN: Restore real 1:1 villagers in each populated cell according to the saved map
-        // ES: Restaurar aldeanos reales 1:1 en cada celda poblada según el mapa guardado
-        m_gestorHumanos.getHumanos().clear();
-        std::map<int, bool> hasShamanForRel;
-        static const char* NOMBRES_CHAMAN[6] = {
-            "Chaman Arandu", "Chaman Arandu", "Chaman Khep",
-            "Chaman Orph", "Chaman Mithra", "Chaman Dharma"
-        };
-        int nextVillagerId = 1;
-        int firstShamanId = -1;
-        for (int cellY = 0; cellY < m_map.getHeight(); ++cellY) {
-            for (int cellX = 0; cellX < m_map.getWidth(); ++cellX) {
-                Cell& targetCell = m_map.getCell(cellX, cellY);
-                int count = std::clamp(targetCell.population, 0, 10);
-                targetCell.population = count;
-                for (int villagerIndex = 0; villagerIndex < count; ++villagerIndex) {
-                    float subOffsetX = 0.25f + 0.15f * static_cast<float>(villagerIndex % 3);
-                    float subOffsetY = 0.25f + 0.15f * static_cast<float>((villagerIndex / 3) % 3);
-                    int currentVillagerId = nextVillagerId++;
-                    int religionId = (targetCell.dominantReligionId > 0) ? targetCell.dominantReligionId : 1;
-                    bool makeShaman = !hasShamanForRel[religionId];
-                    std::string unitName = makeShaman
-                        ? std::string(NOMBRES_CHAMAN[std::clamp(religionId, 0, 5)])
-                        : ("Grog #" + std::to_string(currentVillagerId));
-                    Humano newVillager(currentVillagerId, unitName, static_cast<float>(cellX) + subOffsetX, static_cast<float>(cellY) + subOffsetY);
-                    newVillager.setEsChaman(makeShaman);
-                    newVillager.setReligionId(religionId);
-                    newVillager.setDevocion(makeShaman ? 0.98f : targetCell.devotion);
-                    if (makeShaman) {
-                        hasShamanForRel[religionId] = true;
-                        if (religionId == 1 || firstShamanId < 0) firstShamanId = currentVillagerId;
+        // EN: Fallback demographic reconstruction for legacy saves lacking villagers.dat
+        // ES: Reconstrucción demográfica de respaldo para partidas antiguas sin villagers.dat
+        int totalSavedPop = m_map.getTotalWorldPopulation();
+        if (totalSavedPop > 250 || totalSavedPop <= 0) {
+            m_gestorHumanos.inicializarPoblacion(m_map, m_registry, 80);
+        } else {
+            m_gestorHumanos.getHumanos().clear();
+            std::map<int, bool> hasShamanForRel;
+            static const char* NOMBRES_CHAMAN[6] = {
+                "Chaman Arandu", "Chaman Arandu", "Chaman Khep",
+                "Chaman Orph", "Chaman Mithra", "Chaman Dharma"
+            };
+            int nextVillagerId = 1;
+            int firstShamanId = -1;
+            for (int cellY = 0; cellY < m_map.getHeight(); ++cellY) {
+                for (int cellX = 0; cellX < m_map.getWidth(); ++cellX) {
+                    Cell& targetCell = m_map.getCell(cellX, cellY);
+                    int count = std::clamp(targetCell.population, 0, 10);
+                    targetCell.population = count;
+                    for (int villagerIndex = 0; villagerIndex < count; ++villagerIndex) {
+                        float subOffsetX = 0.25f + 0.15f * static_cast<float>(villagerIndex % 3);
+                        float subOffsetY = 0.25f + 0.15f * static_cast<float>((villagerIndex / 3) % 3);
+                        int currentVillagerId = nextVillagerId++;
+                        int religionId = (targetCell.dominantReligionId > 0) ? targetCell.dominantReligionId : 1;
+                        bool makeShaman = !hasShamanForRel[religionId];
+                        std::string unitName = makeShaman
+                            ? std::string(NOMBRES_CHAMAN[std::clamp(religionId, 0, 5)])
+                            : ("Grog #" + std::to_string(currentVillagerId));
+                        Humano newVillager(currentVillagerId, unitName, static_cast<float>(cellX) + subOffsetX, static_cast<float>(cellY) + subOffsetY);
+                        newVillager.setEsChaman(makeShaman);
+                        newVillager.setReligionId(religionId);
+                        newVillager.setDevocion(makeShaman ? 0.98f : targetCell.devotion);
+                        if (makeShaman) {
+                            hasShamanForRel[religionId] = true;
+                            if (religionId == 1 || firstShamanId < 0) firstShamanId = currentVillagerId;
+                        }
+                        m_gestorHumanos.agregarHumano(newVillager);
                     }
-                    m_gestorHumanos.agregarHumano(newVillager);
                 }
             }
+            if (firstShamanId > 0) {
+                m_gestorHumanos.seleccionarHumano(firstShamanId);
+            }
+            m_gestorHumanos.actualizar(0.0f, m_map);
         }
-        if (firstShamanId > 0) {
-            m_gestorHumanos.seleccionarHumano(firstShamanId);
-        }
-        m_gestorHumanos.actualizar(0.0f, m_map);
     }
     m_map.recalculateReligions(m_registry);
 
     initFaithFog(resolvePlayerReligionId());
-    m_buildingSystem.clear();
     m_renderer.setBuildingSystem(&m_buildingSystem);
 
     m_gameOverTriggered = false;
@@ -2103,26 +3366,30 @@ void Game::loadStateFromSave(const WorldMap& map, const ReligionRegistry& regist
     m_extinctionYear = currentYear;
 
     m_gameState = GameState::Playing;
-    saveCurrentGame();
+    saveCurrentGame(m_currentSaveSlot);
 }
 
 void Game::saveCurrentGame(const std::string& slotName) {
     std::string folder = slotName;
     if (folder.empty()) {
-        std::string safeGod = m_creationConfig.godName;
-        for (char& charElem : safeGod) {
-            if (!std::isalnum(static_cast<unsigned char>(charElem))) charElem = '_';
+        if (!m_currentSaveSlot.empty()) {
+            folder = m_currentSaveSlot;
+        } else {
+            m_currentSaveSlot = SaveSystem::generateUniqueSlotName(m_creationConfig.godName, m_creationConfig.mapSeed);
+            folder = m_currentSaveSlot;
         }
-        folder = "Mundo_" + safeGod + "_" + std::to_string(m_creationConfig.mapSeed);
+    } else {
+        m_currentSaveSlot = folder;
     }
     SaveSystem::saveWorld(*this, folder);
 }
 
-void Game::runHeadless(int maxTicks, const std::string& exportPPM) {
-    if (m_registry.getAllReligions().empty()) {
-        startNewCustomWorld();
-    }
+void Game::runHeadless(int maxTicks, const std::string& exportPPM, bool revealFog) {
+    startNewCustomWorld();
     m_gameState = GameState::Playing;
+    if (revealFog) {
+        executeCommand("LUMINUS");
+    }
     std::cout << "[Simulator] Running headless simulation for " << maxTicks << " steps..." << std::endl;
     float deltaSimulationTime = 0.2f;
 
@@ -2148,6 +3415,557 @@ void Game::runHeadless(int maxTicks, const std::string& exportPPM) {
                   << " Era: " << AdvancementSystem::getEraName(religionEntry.currentEra)
                   << (religionEntry.isExtinct ? " [EXTINCT]" : "") << std::endl;
     }
+}
+
+void Game::applySettings(const GameSettings& settings) {
+    // EN: Synchronize audio system gains and mute toggles
+    // ES: Sincronizar ganancias del sistema de audio y conmutadores de silencio
+    m_soundSystem.setMasterVolume(static_cast<float>(settings.masterVolumePercent) / 100.0f);
+    m_soundSystem.setMusicVolume(static_cast<float>(settings.musicVolumePercent) / 100.0f);
+    m_soundSystem.setSFXVolume(static_cast<float>(settings.sfxVolumePercent) / 100.0f);
+    m_soundSystem.setAmbientVolume(static_cast<float>(settings.ambientVolumePercent) / 100.0f);
+    m_soundSystem.setMuted(settings.soundMuted);
+
+    // EN: Synchronize default timeline simulation pacing
+    // ES: Sincronizar ritmo de simulación de la línea temporal por defecto
+    m_timeline.setYearsPerSecond(GameSettings::getSimulationSpeedValue(settings.defaultSpeed));
+
+    // EN: Synchronize isometric terrain grid visualization with renderer
+    // ES: Sincronizar visualización de retícula isométrica de terreno con el renderizador
+    m_renderer.setShowGrid(settings.showIsometricGrid);
+    m_renderer.setDeveloperMode(settings.developerMode);
+    m_developerMode = settings.developerMode;
+
+    // EN: Target window dimensions according to the selected resolution setting
+    // ES: Dimensiones de ventana objetivo de acuerdo con el ajuste de resolución seleccionado
+    const int targetCanvasWidth = GameSettings::getResolutionWidth(settings.resolution);
+    const int targetCanvasHeight = GameSettings::getResolutionHeight(settings.resolution);
+    m_renderer.setWindowedResolution(targetCanvasWidth, targetCanvasHeight);
+
+    // EN: Synchronize display mode (Fullscreen vs Windowed)
+    // ES: Sincronizar modo de pantalla (Pantalla completa vs Ventana)
+    const bool shouldBeFullscreen = (settings.displayMode == DisplayMode::BorderlessFullscreen);
+    if (m_renderer.isFullscreen() != shouldBeFullscreen) {
+        m_renderer.setFullscreen(shouldBeFullscreen);
+    }
+
+    // EN: Ensure Game viewport dimensions and camera synchronize with active renderer
+    // ES: Asegurar que las dimensiones del viewport de Game y la cámara se sincronicen con el renderizador activo
+    if (m_renderer.getWidth() != m_windowWidth || m_renderer.getHeight() != m_windowHeight) {
+        m_windowWidth = m_renderer.getWidth();
+        m_windowHeight = m_renderer.getHeight();
+        m_camera.setScreenSize(m_windowWidth, m_windowHeight);
+    }
+}
+
+void Game::loadSettings() {
+    const std::string settingsFilePath = SaveSystem::getSavesRootDirectory() + "/game_settings.cfg";
+    if (m_settings.loadFromFile(settingsFilePath)) {
+        std::cout << "[GameSettings] Opciones cargadas desde: " << settingsFilePath << std::endl;
+    } else {
+        std::cout << "[GameSettings] Usando configuracion predeterminada (sin archivo previo)." << std::endl;
+    }
+}
+
+void Game::saveSettings() {
+    const std::string settingsFilePath = SaveSystem::getSavesRootDirectory() + "/game_settings.cfg";
+    if (m_settings.saveToFile(settingsFilePath)) {
+        std::cout << "[GameSettings] Opciones guardadas exitosamente en: " << settingsFilePath << std::endl;
+    } else {
+        std::cerr << "[GameSettings] Error al guardar opciones en: " << settingsFilePath << std::endl;
+    }
+}
+
+// =============================================================================
+// EN: Developer mode toggle and direct control methods
+// ES: Métodos de alternancia y control directo del modo desarrollador
+// =============================================================================
+void Game::toggleDeveloperMode() {
+    m_developerMode = !m_developerMode;
+    m_settings.developerMode = m_developerMode;
+    m_renderer.setDeveloperMode(m_developerMode);
+    m_soundSystem.playSFX(SFXType::UIClick);
+    showFeedback(m_developerMode ? "MODO DESARROLLADOR: ACTIVADO [F3]" : "MODO DESARROLLADOR: DESACTIVADO [F3]", 3.0f);
+}
+
+void Game::setDeveloperMode(bool enable) {
+    m_developerMode = enable;
+    m_settings.developerMode = m_developerMode;
+    m_renderer.setDeveloperMode(m_developerMode);
+}
+
+// =============================================================================
+// EN: Setup Map Editor state, initializing map and parameters if not yet created
+// ES: Configurar estado del Editor de Mapas, inicializando mapa y parámetros
+// =============================================================================
+void Game::setupMapEditor() {
+    m_previousGameState = m_gameState;
+    m_gameState = GameState::MapEditor;
+    m_isPaintingMapEditor = false;
+    m_activeInputField = 0;
+
+    const int mapDim = getMapDimensionFromIndex(m_mapEditorConfig.mapSizeIndex);
+    if (m_editorMap.getWidth() != mapDim || m_editorMap.getHeight() != mapDim) {
+        regenerateEditorMap();
+    } else {
+        m_camera.reset(mapDim, mapDim);
+        m_camera.centerOnCell(mapDim / 2, mapDim / 2, mapDim, mapDim);
+        m_camera.setZoom(1.0f);
+        m_mapEditorConfig.statusMessage = "TALLER DE CARTOGRAFIA LITURGICA ACTIVO";
+        m_mapEditorConfig.statusTimer = 3.0f;
+    }
+}
+
+// =============================================================================
+// EN: Regenerate procedural world in editor according to seed, climate & size
+// ES: Regenerar mundo procedimental en el editor según semilla, clima y tamaño
+// =============================================================================
+void Game::regenerateEditorMap() {
+    const int mapDim = getMapDimensionFromIndex(m_mapEditorConfig.mapSizeIndex);
+    m_editorMap = WorldMap(mapDim, mapDim);
+    m_editorMap.generateProceduralWorld(m_mapEditorConfig.mapSeed,
+                                        m_mapEditorConfig.worldClimate,
+                                        m_mapEditorConfig.resourceAbundance);
+    m_editorMap.updateWaterDepthPhases();
+    m_camera.reset(mapDim, mapDim);
+    m_camera.centerOnCell(mapDim / 2, mapDim / 2, mapDim, mapDim);
+    m_camera.setZoom(1.0f);
+
+    m_mapEditorConfig.statusMessage = "MUNDO PROCEDIMENTAL GENERADO (" +
+                                      std::to_string(mapDim) + "x" +
+                                      std::to_string(mapDim) + " CELDAS)";
+    m_mapEditorConfig.statusTimer = 3.5f;
+}
+
+// =============================================================================
+// EN: Apply the active brush to the editor world map at given cell coordinates
+// ES: Aplicar el pincel activo al mapa de mundo del editor en las coordenadas dadas
+// =============================================================================
+void Game::applyMapEditorBrush(int centerCellX, int centerCellY) {
+    if (!m_editorMap.isValid(centerCellX, centerCellY)) return;
+
+    if (m_mapEditorConfig.activeBrush == MapEditorBrush::Inspect) {
+        const Cell& cell = m_editorMap.getCell(centerCellX, centerCellY);
+        m_mapEditorConfig.statusMessage = "Celda (" + std::to_string(centerCellX) + ", " +
+                                          std::to_string(centerCellY) + ") Elev:" +
+                                          std::to_string(cell.elevation) + " Rec:" +
+                                          getResourceTypeName(cell.naturalResource);
+        m_mapEditorConfig.statusTimer = 2.5f;
+        return;
+    }
+
+    const int radiusOffset = (m_mapEditorConfig.brushRadius == 1) ? 0 :
+                             ((m_mapEditorConfig.brushRadius == 2) ? 1 : 2);
+    bool modifiedTerrain = false;
+
+    for (int deltaY = -radiusOffset; deltaY <= radiusOffset; ++deltaY) {
+        for (int deltaX = -radiusOffset; deltaX <= radiusOffset; ++deltaX) {
+            const int targetX = centerCellX + deltaX;
+            const int targetY = centerCellY + deltaY;
+            if (!m_editorMap.isValid(targetX, targetY)) continue;
+
+            Cell& cell = m_editorMap.getCell(targetX, targetY);
+            modifiedTerrain = true;
+
+            switch (m_mapEditorConfig.activeBrush) {
+                case MapEditorBrush::Ocean:
+                    cell.customTileIndex = -1;
+                    cell.biome = BiomeType::DeepOcean;
+                    cell.elevation = 0.0f;
+                    cell.waterDepth = 1.0f;
+                    cell.naturalResource = ResourceType::None;
+                    cell.resourceAmount = 0;
+                    break;
+                case MapEditorBrush::ShallowWater:
+                    cell.customTileIndex = -1;
+                    cell.biome = BiomeType::ShallowWater;
+                    cell.elevation = 1.0f;
+                    cell.waterDepth = 0.5f;
+                    cell.naturalResource = ResourceType::None;
+                    cell.resourceAmount = 0;
+                    break;
+                case MapEditorBrush::FertileValley:
+                    cell.customTileIndex = -1;
+                    cell.biome = BiomeType::FertileValley;
+                    cell.elevation = std::max(1.0f, cell.elevation);
+                    cell.waterDepth = 0.0f;
+                    break;
+                case MapEditorBrush::DenseForest:
+                    cell.customTileIndex = -1;
+                    cell.biome = BiomeType::DenseForest;
+                    cell.elevation = std::max(1.0f, cell.elevation);
+                    cell.waterDepth = 0.0f;
+                    cell.naturalResource = ResourceType::Wood;
+                    cell.resourceAmount = 300;
+                    break;
+                case MapEditorBrush::HighlandHills:
+                    cell.customTileIndex = -1;
+                    cell.biome = BiomeType::HighlandHills;
+                    cell.elevation = std::clamp(cell.elevation, 2.0f, 4.0f);
+                    cell.waterDepth = 0.0f;
+                    break;
+                case MapEditorBrush::RuggedMountains:
+                    cell.customTileIndex = -1;
+                    cell.biome = BiomeType::RuggedMountains;
+                    cell.elevation = std::clamp(cell.elevation, 4.0f, 7.0f);
+                    cell.waterDepth = 0.0f;
+                    break;
+                case MapEditorBrush::AridDesert:
+                    cell.customTileIndex = -1;
+                    cell.biome = BiomeType::AridDesert;
+                    cell.elevation = std::max(1.0f, cell.elevation);
+                    cell.waterDepth = 0.0f;
+                    break;
+                case MapEditorBrush::FrozenTundra:
+                    cell.customTileIndex = -1;
+                    cell.biome = BiomeType::FrozenTundra;
+                    cell.elevation = std::max(1.0f, cell.elevation);
+                    cell.waterDepth = 0.0f;
+                    break;
+                case MapEditorBrush::VolcanicCaldera:
+                    cell.customTileIndex = -1;
+                    cell.biome = BiomeType::VolcanicCaldera;
+                    cell.elevation = std::max(3.0f, cell.elevation);
+                    cell.waterDepth = 0.0f;
+                    cell.hasVolcano = true;
+                    cell.hasActiveLava = true;
+                    cell.lavaTimer = 10.0f;
+                    break;
+                case MapEditorBrush::Wood:
+                    if (!cell.isNaturalWater()) {
+                        cell.naturalResource = ResourceType::Wood;
+                        cell.resourceAmount = 250;
+                        cell.hasTreesUprooted = false;
+                    }
+                    break;
+                case MapEditorBrush::Stone:
+                    if (!cell.isNaturalWater()) {
+                        cell.naturalResource = ResourceType::Stone;
+                        cell.resourceAmount = 250;
+                    }
+                    break;
+                case MapEditorBrush::Gold:
+                    if (!cell.isNaturalWater()) {
+                        cell.naturalResource = ResourceType::Gold;
+                        cell.resourceAmount = 200;
+                    }
+                    break;
+                case MapEditorBrush::Iron:
+                    if (!cell.isNaturalWater()) {
+                        cell.naturalResource = ResourceType::Iron;
+                        cell.resourceAmount = 250;
+                    }
+                    break;
+                case MapEditorBrush::Copper:
+                    if (!cell.isNaturalWater()) {
+                        cell.naturalResource = ResourceType::Copper;
+                        cell.resourceAmount = 250;
+                    }
+                    break;
+                case MapEditorBrush::Diamond:
+                    if (!cell.isNaturalWater()) {
+                        cell.naturalResource = ResourceType::Diamond;
+                        cell.resourceAmount = 150;
+                    }
+                    break;
+                case MapEditorBrush::ClearResource:
+                    cell.naturalResource = ResourceType::None;
+                    cell.resourceAmount = 0;
+                    cell.hasVolcano = false;
+                    cell.hasActiveLava = false;
+                    cell.hasImpactCrater = false;
+                    cell.isBurnt = false;
+                    break;
+                case MapEditorBrush::RaiseElevation:
+                    cell.elevation = std::min(7.0f, cell.elevation + 1.0f);
+                    if (cell.elevation > 0.5f && cell.isNaturalWater()) {
+                        cell.biome = BiomeType::CoastalPlains;
+                        cell.waterDepth = 0.0f;
+                    }
+                    break;
+                case MapEditorBrush::LowerElevation:
+                    cell.elevation = std::max(0.0f, cell.elevation - 1.0f);
+                    if (cell.elevation <= 0.05f) {
+                        cell.biome = BiomeType::DeepOcean;
+                        cell.waterDepth = 1.0f;
+                    }
+                    break;
+                case MapEditorBrush::FlattenElevation:
+                    cell.elevation = 1.0f;
+                    if (cell.isNaturalWater()) {
+                        cell.waterDepth = 0.0f;
+                        cell.biome = BiomeType::CoastalPlains;
+                    }
+                    break;
+                case MapEditorBrush::TileGrass:
+                    cell.customTileIndex = 0;
+                    cell.biome = BiomeType::FertileValley;
+                    cell.waterDepth = 0.0f;
+                    cell.elevation = std::max(1.0f, cell.elevation);
+                    break;
+                case MapEditorBrush::TileRock:
+                    cell.customTileIndex = 1;
+                    cell.biome = BiomeType::RuggedMountains;
+                    cell.waterDepth = 0.0f;
+                    cell.elevation = std::max(2.0f, cell.elevation);
+                    break;
+                case MapEditorBrush::TileTropicalPlains:
+                    cell.customTileIndex = 2;
+                    cell.biome = BiomeType::CoastalPlains;
+                    cell.waterDepth = 0.0f;
+                    cell.elevation = std::max(1.0f, cell.elevation);
+                    break;
+                case MapEditorBrush::TileFarmland:
+                    cell.customTileIndex = 3;
+                    cell.biome = BiomeType::FertileValley;
+                    cell.waterDepth = 0.0f;
+                    cell.elevation = std::max(1.0f, cell.elevation);
+                    break;
+                case MapEditorBrush::TileDeepOceanAlt:
+                    cell.customTileIndex = 4;
+                    cell.biome = BiomeType::DeepOcean;
+                    cell.waterDepth = 1.0f;
+                    cell.elevation = 0.0f;
+                    cell.naturalResource = ResourceType::None;
+                    break;
+                case MapEditorBrush::TileRichForest:
+                    cell.customTileIndex = 5;
+                    cell.biome = BiomeType::DenseForest;
+                    cell.waterDepth = 0.0f;
+                    cell.elevation = std::max(1.0f, cell.elevation);
+                    cell.naturalResource = ResourceType::Wood;
+                    cell.resourceAmount = 300;
+                    cell.hasTreesUprooted = false;
+                    break;
+                case MapEditorBrush::TileHighlands:
+                    cell.customTileIndex = 6;
+                    cell.biome = BiomeType::HighlandHills;
+                    cell.waterDepth = 0.0f;
+                    cell.elevation = std::clamp(cell.elevation, 2.0f, 4.0f);
+                    break;
+                case MapEditorBrush::TileSwamp:
+                    cell.customTileIndex = 7;
+                    cell.biome = BiomeType::CoastalPlains;
+                    cell.waterDepth = 0.20f;
+                    cell.elevation = 0.8f;
+                    break;
+                case MapEditorBrush::TileSand:
+                    cell.customTileIndex = 8;
+                    cell.biome = BiomeType::AridDesert;
+                    cell.waterDepth = 0.0f;
+                    cell.elevation = std::max(1.0f, cell.elevation);
+                    break;
+                case MapEditorBrush::TileSnow:
+                    cell.customTileIndex = 9;
+                    cell.biome = BiomeType::FrozenTundra;
+                    cell.waterDepth = 0.0f;
+                    cell.elevation = std::max(1.0f, cell.elevation);
+                    break;
+                case MapEditorBrush::TileShallowWater:
+                    cell.customTileIndex = 10;
+                    cell.biome = BiomeType::ShallowWater;
+                    cell.waterDepth = 0.5f;
+                    cell.elevation = 1.0f;
+                    cell.naturalResource = ResourceType::None;
+                    break;
+                case MapEditorBrush::TileMidOcean:
+                    cell.customTileIndex = 11;
+                    cell.biome = BiomeType::DeepOcean;
+                    cell.waterDepth = 0.8f;
+                    cell.elevation = 0.0f;
+                    cell.naturalResource = ResourceType::None;
+                    break;
+                case MapEditorBrush::TileCaveWater:
+                    cell.customTileIndex = 12;
+                    cell.biome = BiomeType::ShallowWater;
+                    cell.waterDepth = 0.6f;
+                    cell.elevation = 0.0f;
+                    cell.naturalResource = ResourceType::None;
+                    break;
+                case MapEditorBrush::TileAbyssal:
+                    cell.customTileIndex = 13;
+                    cell.biome = BiomeType::DeepOcean;
+                    cell.waterDepth = 1.0f;
+                    cell.elevation = 0.0f;
+                    cell.naturalResource = ResourceType::None;
+                    break;
+                case MapEditorBrush::TileOpenOcean:
+                    cell.customTileIndex = 14;
+                    cell.biome = BiomeType::DeepOcean;
+                    cell.waterDepth = 0.9f;
+                    cell.elevation = 0.0f;
+                    cell.naturalResource = ResourceType::None;
+                    break;
+                case MapEditorBrush::TileLava:
+                    cell.customTileIndex = 15;
+                    cell.biome = BiomeType::VolcanicCaldera;
+                    cell.hasActiveLava = true;
+                    cell.lavaTimer = 10.0f;
+                    cell.elevation = std::max(1.0f, cell.elevation);
+                    break;
+                case MapEditorBrush::TileAsh:
+                    cell.isBurnt = true;
+                    cell.naturalResource = ResourceType::None;
+                    cell.hasTreesUprooted = true;
+                    break;
+                case MapEditorBrush::TileCrater:
+                    cell.formCrater(CraterType::MeteorImpact, 0.8f, 0.3f);
+                    break;
+                default:
+                    break;
+            }
+        }
+    }
+
+    if (modifiedTerrain) {
+        m_editorMap.updateWaterDepthPhases();
+    }
+}
+
+// =============================================================================
+// EN: Start Playing a new game directly using the custom-crafted editor world map
+// ES: Comenzar a Jugar una nueva partida directamente usando el mapa personalizado del editor
+// =============================================================================
+void Game::startPlayWithEditorMap() {
+    resetAllGameSubsystems();
+
+    m_currentSaveSlot = SaveSystem::generateUniqueSlotName("CustomMap", m_mapEditorConfig.mapSeed);
+
+    const int mapDim = m_editorMap.getWidth();
+    m_map = m_editorMap; // Assign full edited map
+    m_cloudSystem.reset(mapDim, mapDim);
+    m_renderer.setCloudSystem(&m_cloudSystem);
+    m_fog.reset(mapDim, mapDim);
+    ErrorSystem::instance().setMaxSafeEntities(std::max(450u, static_cast<uint32_t>(mapDim * 4)));
+
+    for (int cellY = 0; cellY < mapDim; ++cellY) {
+        for (int cellX = 0; cellX < mapDim; ++cellX) {
+            m_map.getCell(cellX, cellY).population = 0;
+        }
+    }
+
+    constexpr int startYear = -4000;
+    m_registry = ReligionRegistry{};
+    m_timeline.reset(startYear, 2200);
+    m_dayNightCycle.resetDaysPassed();
+    m_timeline.setYearsPerSecond(4.0f);
+    m_timeEngine.reset(startYear);
+
+    // Color Oro Divino para el jugador
+    ColorRGB playerColor = Palette::DIVINE_GOLD;
+
+    int playerRelId = m_registry.createPrimordialReligion(
+        "Culto Primordial",
+        "Creador Divino",
+        playerColor,
+        "Sun",
+        startYear
+    );
+    Religion* pRel = m_registry.getReligion(playerRelId);
+    if (pRel) {
+        pRel->currentEra = HistoricalEra::PrimordialAnimism;
+        pRel->resources.food = 600;
+        pRel->resources.wood = 350;
+        pRel->resources.stone = 200;
+        pRel->resources.gold = 50;
+        pRel->theologyPoints += 500;
+        pRel->spiritualPiety = 0.90f;
+        pRel->zeal = 0.80f;
+    }
+
+    // 4 Religiones rivales
+    struct RivalDef { const char* name; const char* founder; ColorRGB color; const char* symbol; };
+    RivalDef rivals[4] = {
+        {"Animist Gaia-Cult", "Zarah-Khep", ColorRGB(46, 204, 113), "Tree"},
+        {"The Sacred Monad", "Melchizedek", ColorRGB(52, 152, 219), "Spiral"},
+        {"Order of the Eternal Flame", "Mithras-Gard", ColorRGB(230, 57, 70), "Flame"},
+        {"Wheel of the Star-Dharma", "Siddhartha-Yin", ColorRGB(155, 89, 182), "Wheel"}
+    };
+
+    for (int rivalIndex = 0; rivalIndex < 4; ++rivalIndex) {
+        int rivalId = m_registry.createPrimordialReligion(
+            rivals[rivalIndex].name, rivals[rivalIndex].founder, rivals[rivalIndex].color, rivals[rivalIndex].symbol, startYear
+        );
+        Religion* rivalRelPtr = m_registry.getReligion(rivalId);
+        if (rivalRelPtr) {
+            rivalRelPtr->currentEra = HistoricalEra::PrimordialAnimism;
+            rivalRelPtr->zeal = 0.5f;
+            rivalRelPtr->resources.food = 400;
+            rivalRelPtr->resources.wood = 250;
+            rivalRelPtr->resources.stone = 150;
+            rivalRelPtr->resources.gold = 30;
+        }
+    }
+
+    // Ubicaciones de pueblos
+    std::vector<Point2i> puebloLocations = m_map.generatePuebloLocations(5, m_mapEditorConfig.mapSeed);
+    Point2i playerHearth{mapDim / 2, mapDim / 2};
+
+    // Si el mapa fue modificado manualmente y no hay suficientes posiciones generadas, buscar celdas habitables
+    if (puebloLocations.size() < 5) {
+        puebloLocations.clear();
+        for (int cellY = 2; cellY < mapDim - 2 && puebloLocations.size() < 5; cellY += 4) {
+            for (int cellX = 2; cellX < mapDim - 2 && puebloLocations.size() < 5; cellX += 4) {
+                if (m_map.getCell(cellX, cellY).isPassableForGround()) {
+                    puebloLocations.push_back({cellX, cellY});
+                }
+            }
+        }
+    }
+
+    if (!puebloLocations.empty()) {
+        playerHearth = puebloLocations[0];
+    } else {
+        // En caso extremo de mapa todo agua, crear una pequeña isla sagrada
+        playerHearth = {mapDim / 2, mapDim / 2};
+        Cell& islandCell = m_map.getCell(playerHearth.x, playerHearth.y);
+        islandCell.biome = BiomeType::FertileValley;
+        islandCell.elevation = 2.0f;
+        islandCell.waterDepth = 0.0f;
+    }
+
+    Cell& playerHearthCell = m_map.getCell(playerHearth.x, playerHearth.y);
+    playerHearthCell.setShare(playerRelId, 0.98f);
+    playerHearthCell.devotion = 0.95f;
+    m_map.consecrateHolySite(playerHearth.x, playerHearth.y, "Santuario Sagrado Primordial");
+    playerHearthCell.shrineLevel = 3;
+
+    // Asignar territorio sagrado alrededor del santuario del jugador
+    for (int deltaCellY = -2; deltaCellY <= 2; ++deltaCellY) {
+        for (int deltaCellX = -2; deltaCellX <= 2; ++deltaCellX) {
+            int neighborCellX = playerHearth.x + deltaCellX;
+            int neighborCellY = playerHearth.y + deltaCellY;
+            float distance = std::sqrt(static_cast<float>(deltaCellX * deltaCellX + deltaCellY * deltaCellY));
+            if (m_map.isValid(neighborCellX, neighborCellY) && distance <= 2.5f && (deltaCellX != 0 || deltaCellY != 0)) {
+                Cell& neighborCell = m_map.getCell(neighborCellX, neighborCellY);
+                if (neighborCell.isHabitable()) {
+                    float share = std::max(0.60f, 0.90f - distance * 0.12f);
+                    neighborCell.setShare(playerRelId, share);
+                    neighborCell.devotion = std::max(0.55f, 0.85f - distance * 0.12f);
+                }
+            }
+        }
+    }
+
+    // Inicializar población humana de aldeanos sobre el mapa personalizado
+    m_gestorHumanos.inicializarPoblacion(m_map, m_registry, 80);
+    m_map.recalculateReligions(m_registry);
+
+    initFaithFog(playerRelId);
+    m_camera.centerOnCell(playerHearth.x, playerHearth.y, mapDim, mapDim);
+    selectCell(playerHearth.x, playerHearth.y);
+
+    m_moralitySystem.getOrCreateProfile(playerRelId);
+    m_buildingSystem.clear();
+    m_renderer.setBuildingSystem(&m_buildingSystem);
+
+    m_gameOverTriggered = false;
+    m_gameOverTimer = 0.0f;
+    m_extinctionYear = startYear;
+
+    m_gameState = GameState::Playing;
+    showFeedback("¡Comenzando partida con el mundo personalizado!", 4.0f);
+    saveCurrentGame(m_currentSaveSlot);
 }
 
 } // namespace ReligionSim

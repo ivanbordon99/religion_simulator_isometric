@@ -59,6 +59,7 @@ public:
     static std::string getEraName(HistoricalEra era);
     static std::string getEraDescription(HistoricalEra era);
     static HistoricalEra getEraForYear(int year);
+    static int getEraStartYear(HistoricalEra era);
     static const EraConfig& getEraConfig(HistoricalEra era);
 
     const AdvancementDoc* getDocInfo(DoctrineType doc) const;
@@ -70,6 +71,7 @@ public:
     bool convalidateAdvancement(Religion& rel, int advId, int currentYear,
                                 std::vector<GameEvent>& outEvents);
     int getConvalidatedCountForEra(const Religion& rel, HistoricalEra era) const;
+    int getTotalAdvancementsInEra(HistoricalEra era) const;
 
 private:
     std::vector<AdvancementDoc> m_doctrineCatalog;

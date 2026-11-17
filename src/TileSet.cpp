@@ -269,33 +269,6 @@ void TileSet::blitTile(uint32_t* dstBuffer, int dstW, int dstH,
     int inicioX = static_cast<int>(pieX - destW * 0.5f);
     int inicioY = static_cast<int>(pieY - destH);
 
-    // Aura espiritual en los pies del humano
-    int ipieX = static_cast<int>(pieX);
-    int ipieY = static_cast<int>(pieY);
-    for (int ox = -4; ox <= 4; ++ox) {
-        for (int oy = -1; oy <= 1; ++oy) {
-            int px = ipieX + ox;
-            int py = ipieY + oy;
-            int fy = dstH - 1 - py;
-            if (px >= 0 && px < dstW && fy >= 0 && fy < dstH) {
-                if (seleccionado) {
-                    // Base resaltada en el color de su fe (formato 0xAABBGGRR)
-                    dstBuffer[fy * dstW + px] = (0xFFu << 24) | (auraColor.b << 16) | (auraColor.g << 8) | auraColor.r;
-                } else {
-                    uint32_t bg = dstBuffer[fy * dstW + px];
-                    uint8_t br = bg & 0xFF;
-                    uint8_t bgc = (bg >> 8) & 0xFF;
-                    uint8_t bb = (bg >> 16) & 0xFF;
-
-                    uint8_t nr = static_cast<uint8_t>((br * 3 + auraColor.r) / 4);
-                    uint8_t ng = static_cast<uint8_t>((bgc * 3 + auraColor.g) / 4);
-                    uint8_t nb = static_cast<uint8_t>((bb * 3 + auraColor.b) / 4);
-                    dstBuffer[fy * dstW + px] = (0xFFu << 24) | (nb << 16) | (ng << 8) | nr;
-                }
-            }
-        }
-    }
-
     int iDestW = static_cast<int>(destW);
     int iDestH = static_cast<int>(destH);
 
@@ -309,9 +282,12 @@ void TileSet::blitTile(uint32_t* dstBuffer, int dstW, int dstH,
         return ((c >> 24) & 0xFF) >= 15;
     };
 
-    int margin = seleccionado ? 2 : 0;
+    // EN: Tight 1-pixel selection border around solid character pixels
+    // ES: Contorno de selección ajustado de 1 píxel alrededor de los píxeles sólidos del personaje
+    int margin = seleccionado ? 1 : 0;
 
-    // Copiar píxeles del tileset con alpha blending y contorno de selección cian (0, 255, 255)
+    // EN: Blit character sprite using alpha transparency to reveal units and background behind it
+    // ES: Volcar sprite del personaje usando transparencia alfa para revelar unidades y fondo detrás
     for (int dy = -margin; dy < iDestH + margin; ++dy) {
         int dstPixelY = inicioY + dy;
         int frameY = dstH - 1 - dstPixelY;
@@ -339,31 +315,23 @@ void TileSet::blitTile(uint32_t* dstBuffer, int dstW, int dstH,
             if (!opaco) {
                 if (seleccionado) {
                     bool vecinoDist1 = false;
-                    bool vecinoDist2 = false;
-                    for (int oy = -2; oy <= 2; ++oy) {
-                        for (int ox = -2; ox <= 2; ++ox) {
+                    for (int oy = -1; oy <= 1; ++oy) {
+                        for (int ox = -1; ox <= 1; ++ox) {
                             if (ox == 0 && oy == 0) continue;
                             if (esPixelOpaco(dx + ox, dy + oy)) {
-                                if (std::abs(ox) <= 1 && std::abs(oy) <= 1) {
-                                    vecinoDist1 = true;
-                                    break;
-                                } else {
-                                    vecinoDist2 = true;
-                                }
+                                vecinoDist1 = true;
+                                break;
                             }
                         }
                         if (vecinoDist1) break;
                     }
-                    if (vecinoDist1 || vecinoDist2) {
-                        // Contorno de selección del color de la fe de la unidad seleccionada
-                        if (vecinoDist1) {
-                            uint8_t lr = static_cast<uint8_t>(std::min(255, static_cast<int>(auraColor.r * 1.25f) + 30));
-                            uint8_t lg = static_cast<uint8_t>(std::min(255, static_cast<int>(auraColor.g * 1.25f) + 30));
-                            uint8_t lb = static_cast<uint8_t>(std::min(255, static_cast<int>(auraColor.b * 1.25f) + 30));
-                            dstBuffer[frameY * dstW + dstPixelX] = (0xFFu << 24) | (lb << 16) | (lg << 8) | lr;
-                        } else {
-                            dstBuffer[frameY * dstW + dstPixelX] = (0xFFu << 24) | (auraColor.b << 16) | (auraColor.g << 8) | auraColor.r;
-                        }
+                    if (vecinoDist1) {
+                        // EN: Clean faith-colored contour tracing the character silhouette
+                        // ES: Contorno limpio con el color de fe ciñéndose a la silueta del personaje
+                        uint8_t lr = static_cast<uint8_t>(std::min(255, static_cast<int>(auraColor.r * 1.25f) + 30));
+                        uint8_t lg = static_cast<uint8_t>(std::min(255, static_cast<int>(auraColor.g * 1.25f) + 30));
+                        uint8_t lb = static_cast<uint8_t>(std::min(255, static_cast<int>(auraColor.b * 1.25f) + 30));
+                        dstBuffer[frameY * dstW + dstPixelX] = (0xFFu << 24) | (lb << 16) | (lg << 8) | lr;
                     }
                 }
                 continue;

@@ -23,6 +23,7 @@ public:
                 std::vector<GameEvent>& outEvents, int currentYear);
 
     const std::vector<MissionaryCaravan>& getActiveCaravans() const { return m_caravans; }
+    std::vector<MissionaryCaravan>& getActiveCaravansMutable() { return m_caravans; }
 
     AIDifficulty getAIDifficulty() const { return m_aiDifficulty; }
     void setAIDifficulty(AIDifficulty diff) { m_aiDifficulty = diff; }

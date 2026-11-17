@@ -25,6 +25,15 @@ public:
 
     void centerOnCell(int gridX, int gridY, int mapWidth, int mapHeight);
     void reset(int mapWidth, int mapHeight);
+
+    // EN: Instantly snap camera position and zoom to target values without lerp lag
+    // ES: Ajustar instantáneamente la posición y zoom de la cámara a los valores objetivo sin retardo lerp
+    void snapToTarget() {
+        m_cameraX = m_targetCameraX;
+        m_cameraY = m_targetCameraY;
+        m_zoom = m_targetZoom;
+    }
+
     void addScreenShake(float intensity, float duration);
     float getShakeIntensity() const { return m_shakeIntensity; }
     float getShakeOffsetX() const { return m_shakeOffsetX; }
@@ -51,7 +60,7 @@ private:
 
     float m_zoom{1.0f};
     float m_targetZoom{1.0f};
-    float m_minZoom{0.2f};
+    float m_minZoom{0.10f};
     float m_maxZoom{3.5f};
 
     bool m_isDragging{false};

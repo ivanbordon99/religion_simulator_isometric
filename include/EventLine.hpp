@@ -33,6 +33,23 @@ public:
 
     size_t size() const { return m_events.size(); }
 
+    // EN: Purge all history chronicle events and reset identifiers
+    // ES: Purgar todos los eventos de la crónica histórica y reiniciar identificadores
+    void clear() {
+        m_events.clear();
+        m_nextId = 1;
+        m_selectedEventId = -1;
+    }
+
+    // EN: Directly register an event loaded from save snapshot
+    // ES: Registrar directamente un evento cargado desde captura de guardado
+    void addEventDirect(const GameEvent& event) {
+        m_events.push_back(event);
+        if (event.id >= m_nextId) {
+            m_nextId = event.id + 1;
+        }
+    }
+
 private:
     size_t m_maxEvents{500};
     int m_nextId{1};

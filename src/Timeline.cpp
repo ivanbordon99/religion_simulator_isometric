@@ -1,4 +1,5 @@
 #include "Timeline.hpp"
+#include "DayNightCycle.hpp"
 #include <algorithm>
 #include <cmath>
 #include <sstream>
@@ -24,6 +25,42 @@ void Timeline::update(float deltaTime, float& outDtYears) {
         m_currentYear = std::min(m_endYear, m_currentYear + step);
         m_tickAccumulator -= static_cast<float>(step);
         outDtYears = static_cast<float>(step);
+    }
+}
+
+// EN: Synchronize timeline progression with DayNightCycle hours and advancement maturity
+// ES: Sincronizar el progreso de la línea temporal con las horas de DayNightCycle y la madurez de avances
+void Timeline::updateSynchronized(float deltaTime, const DayNightCycle& dayNight, float& outDtYears) {
+    (void)deltaTime;
+    outDtYears = 0.0f;
+    if (m_isPaused || m_currentYear >= m_endYear) return;
+
+    // EN: The 24-hour solar cycle maps strictly to the current annual cycle (00:00 to 24:00 = 1 year)
+    // ES: El ciclo solar de 24 horas se mapea estrictamente al ciclo anual actual (00:00 a 24:00 = 1 año)
+    m_yearFraction = dayNight.getTimeOfDay();
+
+    // EN: Calculate target year derived directly from completed days plus advancement bonuses
+    // ES: Calcular el año objetivo derivado directamente de los días completados más las bonificaciones de avances
+    const int totalDaysCompleted = dayNight.getDaysPassed();
+    const int calculatedYear = m_startYear + totalDaysCompleted + m_advancementBonusYears;
+
+    if (calculatedYear > m_currentYear) {
+        const int yearStepDelta = calculatedYear - m_currentYear;
+        m_currentYear = std::min(m_endYear, calculatedYear);
+        outDtYears = static_cast<float>(yearStepDelta);
+    }
+}
+
+// EN: Apply historical civilizational leap from convalidated theological advancements or capstones
+// ES: Aplicar salto histórico civilizatorio por avances teológicos o hitos de era convalidados
+void Timeline::applyAdvancementHistoricalLeap(int leapYears, float& outDtYears) {
+    if (leapYears <= 0) return;
+    m_advancementBonusYears += leapYears;
+    const int previousRecordedYear = m_currentYear;
+    m_currentYear = std::min(m_endYear, m_currentYear + leapYears);
+    const int actualAdvanceDelta = m_currentYear - previousRecordedYear;
+    if (actualAdvanceDelta > 0) {
+        outDtYears += static_cast<float>(actualAdvanceDelta);
     }
 }
 

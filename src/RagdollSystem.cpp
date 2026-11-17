@@ -27,7 +27,7 @@ void Ragdoll::launch(float impulseX, float impulseY, float impulseZ, float angul
     (void)impulseY;
     (void)impulseZ;
     m_active = true;
-    m_settled = false;
+    m_settled = (impulseX == 0.0f && impulseY == 0.0f && impulseZ == 0.0f && angularSpeedRadS == 0.0f);
     m_inWater = false;
     m_angularVelocity = angularSpeedRadS;
     m_bounceCount = 0;
@@ -35,6 +35,7 @@ void Ragdoll::launch(float impulseX, float impulseY, float impulseZ, float angul
     m_waterBobTimer = 0.0f;
     m_settleDuration = 0.0f;
     m_impactFlashTimer = 0.0f;
+    m_lastImpactVelocity = 0.0f;
 }
 
 void Ragdoll::deactivate() {
@@ -43,6 +44,7 @@ void Ragdoll::deactivate() {
     m_inWater = false;
     m_angle = 0.0f;
     m_angularVelocity = 0.0f;
+    m_lastImpactVelocity = 0.0f;
 }
 
 // EN: Update physics simulation for ragdoll entity (trajectory, drag, ground bounce, floating)
@@ -60,59 +62,35 @@ void Ragdoll::update(float deltaTime, float& posX, float& posY, float& altitude,
     int cellY = std::clamp(static_cast<int>(std::floor(posY)), 0, mapRef.getHeight() - 1);
     bool cellIsWater = mapRef.isValid(cellX, cellY) && mapRef.getCell(cellX, cellY).isWater();
 
-    // EN: Behavior for deceased units (corpses settling flat on ground or water)
-    // ES: Comportamiento para unidades fallecidas (cadáveres asentados en tierra o agua)
-    if (isDead) {
-        m_inWater = cellIsWater;
-
-        // EN: Fall under gravity if corpse was airborne
-        // ES: Caída por gravedad si el cadáver estaba en el aire
-        if (altitude > 0.0f) {
-            altitude += velocityZ * deltaTime;
-            posX += velocityX * deltaTime;
-            posY += velocityY * deltaTime;
-            velocityZ -= 90.0f * deltaTime;
-            velocityX *= std::max(0.0f, 1.0f - deltaTime * 4.0f);
-            velocityY *= std::max(0.0f, 1.0f - deltaTime * 4.0f);
-
-            // EN: Orient quickly towards horizontal resting posture
-            // ES: Orientación rápida hacia posición acostada horizontal
-            float targetAngle = (m_angle >= 0.0f) ? 1.57f : -1.57f;
-            if (std::abs(m_angle) < 0.01f) targetAngle = 1.57f;
-            m_angle += (targetAngle - m_angle) * std::min(1.0f, deltaTime * 8.0f);
+    // EN: If already settled at ground level, maintain resting horizontal posture
+    // ES: Si ya está en reposo en el suelo, mantener postura horizontal de descanso
+    if (m_settled && altitude <= 0.0f) {
+        if (isDead) {
+            m_inWater = cellIsWater;
+            float targetAngle = (m_angle >= 0.0f) ? 1.5708f : -1.5708f;
+            if (std::abs(m_angle) < 0.01f) targetAngle = 1.5708f;
+            m_angle += (targetAngle - m_angle) * std::min(1.0f, deltaTime * 12.0f);
         }
-
-        // EN: Ground or water surface impact: immediate collapse and flat repose
-        // ES: Contacto con suelo o superficie de agua: reposo plano sin rebotes
-        if (altitude <= 0.0f) {
-            altitude = 0.0f;
-            velocityX = 0.0f;
-            velocityY = 0.0f;
-            velocityZ = 0.0f;
-            m_angularVelocity = 0.0f;
-            m_settled = true;
-            m_settleDuration += deltaTime;
-
-            // EN: Resting horizontally on ground (~1.57 rad)
-            // ES: Reposo horizontal en el suelo (~1.57 rad)
-            float targetAngle = (m_angle >= 0.0f) ? 1.57f : -1.57f;
-            if (std::abs(m_angle) < 0.01f) targetAngle = 1.57f;
-            m_angle += (targetAngle - m_angle) * std::min(1.0f, deltaTime * 14.0f);
-            if (std::abs(targetAngle - m_angle) < 0.04f) {
-                m_angle = targetAngle;
-            }
-        }
-
-        // EN: Clamp inside map boundaries
-        // ES: Limitar dentro de los límites del mapa
-        posX = std::clamp(posX, 0.5f, static_cast<float>(mapRef.getWidth() - 1) + 0.5f);
-        posY = std::clamp(posY, 0.5f, static_cast<float>(mapRef.getHeight() - 1) + 0.5f);
         return;
     }
 
-    // EN: Behavior for living units launched by cataclysms or impact
-    // ES: Comportamiento para unidades vivas lanzadas por cataclismos
+    // EN: High-velocity airborne trajectory and ballistic flight (both living and deceased units fly realistically)
+    // ES: Trayectoria aérea a alta velocidad y vuelo balístico (tanto unidades vivas como fallecidas vuelan con inercia realista)
     if (!m_settled || altitude > 0.0f) {
+        // EN: Gravity and aerodynamic drag
+        // ES: Gravedad y resistencia aerodinámica
+        if (!m_inWater) {
+            velocityZ -= GRAVITY_ACCELERATION_UNITS_S2 * deltaTime;
+            const float airDragFactor = std::max(0.0f, 1.0f - deltaTime * 0.35f);
+            velocityX *= airDragFactor;
+            velocityY *= airDragFactor;
+        } else {
+            velocityZ -= 18.0f * deltaTime; // Buoyancy in fluid
+            const float waterDragFactor = std::max(0.0f, 1.0f - deltaTime * 2.8f);
+            velocityX *= waterDragFactor;
+            velocityY *= waterDragFactor;
+        }
+
         altitude += velocityZ * deltaTime;
         posX += velocityX * deltaTime;
         posY += velocityY * deltaTime;
@@ -122,41 +100,33 @@ void Ragdoll::update(float deltaTime, float& posX, float& posY, float& altitude,
         posX = std::clamp(posX, 0.5f, static_cast<float>(mapRef.getWidth() - 1) + 0.5f);
         posY = std::clamp(posY, 0.5f, static_cast<float>(mapRef.getHeight() - 1) + 0.5f);
 
-        // EN: Gravity and aerodynamic drag
-        // ES: Gravedad y resistencia aerodinámica
-        if (!m_inWater) {
-            velocityZ -= 65.0f * deltaTime;
-            velocityX *= std::max(0.0f, 1.0f - deltaTime * 0.75f);
-            velocityY *= std::max(0.0f, 1.0f - deltaTime * 0.75f);
-        } else {
-            velocityZ -= 18.0f * deltaTime; // EN: Buoyancy in fluid / ES: Flotabilidad en fluido
-            velocityX *= std::max(0.0f, 1.0f - deltaTime * 2.8f);
-            velocityY *= std::max(0.0f, 1.0f - deltaTime * 2.8f);
-        }
-
-        // EN: Body tumble and rotation
-        // ES: Rotación y voltereta del cuerpo
+        // EN: Body tumble, spin, and rotation
+        // ES: Rotación, giro y voltereta del cuerpo
         m_angle += m_angularVelocity * deltaTime;
-        m_angularVelocity *= std::max(0.0f, 1.0f - deltaTime * 0.85f);
+        m_angularVelocity *= std::max(0.0f, 1.0f - deltaTime * 0.55f);
 
         // EN: Procedural inertial flailing of limbs
         // ES: Sacudida inercial de extremidades articuladas
-        m_flailTimer += deltaTime * (std::abs(m_angularVelocity) * 1.5f + std::abs(velocityZ) * 0.12f + 4.0f);
-        m_armL.angle = std::sin(m_flailTimer * 5.5f) * 0.85f + (velocityX * 0.18f);
-        m_armR.angle = -std::sin(m_flailTimer * 5.5f + 0.6f) * 0.85f - (velocityX * 0.18f);
-        m_legL.angle = std::cos(m_flailTimer * 4.8f) * 0.70f + (velocityY * 0.15f);
-        m_legR.angle = -std::cos(m_flailTimer * 4.8f + 0.8f) * 0.70f - (velocityY * 0.15f);
+        m_flailTimer += deltaTime * (std::abs(m_angularVelocity) * 1.8f + std::abs(velocityZ) * 0.15f + 4.0f);
+        m_armL.angle = std::sin(m_flailTimer * 5.5f) * 0.95f + (velocityX * 0.20f);
+        m_armR.angle = -std::sin(m_flailTimer * 5.5f + 0.6f) * 0.95f - (velocityX * 0.20f);
+        m_legL.angle = std::cos(m_flailTimer * 4.8f) * 0.85f + (velocityY * 0.18f);
+        m_legR.angle = -std::cos(m_flailTimer * 4.8f + 0.8f) * 0.85f - (velocityY * 0.18f);
     }
 
-    // EN: Surface collision (Ground or Water)
-    // ES: Colisión con la superficie (Tierra o Agua)
+    // EN: Surface collision (Ground or Water impact)
+    // ES: Colisión con la superficie (Impacto en Tierra o Agua)
     if (altitude <= 0.0f) {
+        if (velocityZ < 0.0f) {
+            const float impactSpeed = std::abs(velocityZ);
+            if (impactSpeed > m_lastImpactVelocity) {
+                m_lastImpactVelocity = impactSpeed;
+            }
+        }
+
         if (cellIsWater) {
             m_inWater = true;
             m_waterBobTimer += deltaTime;
-
-            // EN: Gentle hydrodynamic bobbing
-            // ES: Flotación hidrodinámica suave
             altitude = std::sin(m_waterBobTimer * 2.8f) * 2.2f - 3.5f;
             velocityX *= std::max(0.0f, 1.0f - deltaTime * 3.5f);
             velocityY *= std::max(0.0f, 1.0f - deltaTime * 3.5f);
@@ -173,29 +143,30 @@ void Ragdoll::update(float deltaTime, float& posX, float& posY, float& altitude,
 
             // EN: Elastic restitution bounce against rocky ground
             // ES: Rebote elástico contra suelo rocoso o tierra
-            if (std::abs(velocityZ) > 13.0f) {
+            if (std::abs(velocityZ) > 10.0f && m_bounceCount < 4) {
                 altitude = 0.0f;
-                velocityZ = -velocityZ * 0.38f;
-                velocityX *= 0.60f;
-                velocityY *= 0.60f;
-                m_angularVelocity = -m_angularVelocity * 0.45f + (velocityX * 4.0f);
+                velocityZ = -velocityZ * 0.42f; // Rebound back into the air
+                velocityX *= 0.72f;
+                velocityY *= 0.72f;
+                m_angularVelocity = -m_angularVelocity * 0.50f + ((velocityX + velocityY) * 3.5f);
                 m_bounceCount++;
                 m_impactFlashTimer = 0.15f;
             } else {
-                // EN: Final friction damping on ground
-                // ES: Freno final por fricción con el suelo
+                // EN: Ground skidding friction
+                // ES: Fricción y derrape en el suelo
                 altitude = 0.0f;
                 velocityZ = 0.0f;
-                velocityX *= std::max(0.0f, 1.0f - deltaTime * 6.5f);
-                velocityY *= std::max(0.0f, 1.0f - deltaTime * 6.5f);
+                velocityX *= std::max(0.0f, 1.0f - deltaTime * 4.5f);
+                velocityY *= std::max(0.0f, 1.0f - deltaTime * 4.5f);
 
-                if (std::abs(velocityX) < 0.12f && std::abs(velocityY) < 0.12f) {
+                if (std::abs(velocityX) < 0.15f && std::abs(velocityY) < 0.15f) {
                     m_settled = true;
                     velocityX = 0.0f;
                     velocityY = 0.0f;
                     m_angularVelocity = 0.0f;
 
-                    float targetAngle = (m_angle >= 0.0f) ? 1.57f : -1.57f;
+                    float targetAngle = (m_angle >= 0.0f) ? 1.5708f : -1.5708f;
+                    if (std::abs(m_angle) < 0.01f) targetAngle = 1.5708f;
                     m_angle += (targetAngle - m_angle) * std::min(1.0f, deltaTime * 8.0f);
                     m_settleDuration += deltaTime;
                 }

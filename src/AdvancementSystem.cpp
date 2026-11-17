@@ -330,6 +330,34 @@ HistoricalEra AdvancementSystem::getEraForYear(int year) {
     return HistoricalEra::TranshumanistPostBiological;                      // Era 8: 2060+
 }
 
+// EN: Return the canonical starting year of each historical era
+// ES: Devolver el año inicial canónico de cada era histórica
+int AdvancementSystem::getEraStartYear(HistoricalEra era) {
+    switch (era) {
+        case HistoricalEra::PrimordialAnimism:             return -4000;
+        case HistoricalEra::TotemismAncestorWorship:        return -3000;
+        case HistoricalEra::StructuralShamanism:           return -2000;
+        case HistoricalEra::TerritorialPolytheism:         return -1000;
+        case HistoricalEra::UniversalReligions:            return 200;
+        case HistoricalEra::RationalizationSecularization: return 1500;
+        case HistoricalEra::PostSecular:                   return 1980;
+        case HistoricalEra::TranshumanistPostBiological:   return 2060;
+        default: return -4000;
+    }
+}
+
+// EN: Return total count of advancements defined in the faith tree for a specific era
+// ES: Devolver la cantidad total de avances definidos en el árbol de fe para una era específica
+int AdvancementSystem::getTotalAdvancementsInEra(HistoricalEra era) const {
+    int totalAdvancementsCount = 0;
+    for (const auto& advancementItem : m_advancementTree) {
+        if (advancementItem.era == era) {
+            totalAdvancementsCount++;
+        }
+    }
+    return totalAdvancementsCount > 0 ? totalAdvancementsCount : 4;
+}
+
 const AdvancementDoc* AdvancementSystem::getDocInfo(DoctrineType doc) const {
     for (const auto& item : m_doctrineCatalog) {
         if (item.type == doc) return &item;

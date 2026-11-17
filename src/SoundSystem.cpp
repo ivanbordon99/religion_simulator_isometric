@@ -5,6 +5,7 @@
 #include "DivinePowersSystem.hpp"
 #include "Humano.hpp"
 #include <iostream>
+#include <fstream>
 #include <algorithm>
 #include <cstring>
 #include <chrono>
@@ -101,11 +102,96 @@ bool SoundSystem::init() {
         m_deviceName = "Emulated Silent Mixer";
     }
 
-    // 2. Iniciar el hilo de síntesis y reproducción de audio en tiempo real
+    // EN: 2. Preload authentic nuclear explosion audio sample from disk
+    // ES: 2. Precargar muestra de audio auténtica de explosión nuclear desde disco
+    if (!loadAtomicBombAudio("assets/audio/bomb_explosion.wav")) {
+        loadAtomicBombAudio("../assets/audio/bomb_explosion.wav");
+    }
+
+    // 3. Iniciar el hilo de síntesis y reproducción de audio en tiempo real
     m_running.store(true);
     m_audioThread = std::thread(&SoundSystem::audioThreadLoop, this);
 
     return true;
+}
+
+// EN: Load authentic nuclear explosion WAV audio sample from disk (16-bit PCM stereo/mono)
+// ES: Cargar muestra de audio WAV auténtica de explosión nuclear desde disco (PCM 16 bits estéreo/mono)
+bool SoundSystem::loadAtomicBombAudio(const std::string& filePath) {
+    std::ifstream audioFile(filePath, std::ios::binary);
+    if (!audioFile.is_open()) {
+        return false;
+    }
+
+    char riffHeader[12];
+    if (!audioFile.read(riffHeader, 12)) return false;
+    if (std::string(riffHeader, 4) != "RIFF" || std::string(riffHeader + 8, 4) != "WAVE") {
+        return false;
+    }
+
+    uint16_t numChannels = 0;
+    uint32_t sampleRate = 0;
+    uint16_t bitsPerSample = 0;
+
+    while (audioFile) {
+        char chunkId[4];
+        uint32_t chunkSize = 0;
+        if (!audioFile.read(chunkId, 4)) break;
+        if (!audioFile.read(reinterpret_cast<char*>(&chunkSize), 4)) break;
+
+        const std::string idString(chunkId, 4);
+        if (idString == "fmt ") {
+            uint16_t audioFormat = 0;
+            audioFile.read(reinterpret_cast<char*>(&audioFormat), 2);
+            audioFile.read(reinterpret_cast<char*>(&numChannels), 2);
+            audioFile.read(reinterpret_cast<char*>(&sampleRate), 4);
+            uint32_t byteRate = 0;
+            uint16_t blockAlign = 0;
+            audioFile.read(reinterpret_cast<char*>(&byteRate), 4);
+            audioFile.read(reinterpret_cast<char*>(&blockAlign), 2);
+            audioFile.read(reinterpret_cast<char*>(&bitsPerSample), 2);
+            if (chunkSize > 16) {
+                audioFile.seekg(chunkSize - 16, std::ios::cur);
+            }
+        } else if (idString == "data") {
+            if (bitsPerSample != 16 || (numChannels != 1 && numChannels != 2)) {
+                return false;
+            }
+            const size_t totalSamples = chunkSize / 2;
+            std::vector<int16_t> rawBuffer(totalSamples);
+            audioFile.read(reinterpret_cast<char*>(rawBuffer.data()), chunkSize);
+
+            std::lock_guard<std::mutex> lock(m_mutex);
+            m_atomicBombSamplesL.clear();
+            m_atomicBombSamplesR.clear();
+
+            if (numChannels == 2) {
+                const size_t frameCount = totalSamples / 2;
+                m_atomicBombSamplesL.reserve(frameCount);
+                m_atomicBombSamplesR.reserve(frameCount);
+                for (size_t sampleIndex = 0; sampleIndex < frameCount; ++sampleIndex) {
+                    m_atomicBombSamplesL.push_back(static_cast<float>(rawBuffer[sampleIndex * 2]) / 32768.0f);
+                    m_atomicBombSamplesR.push_back(static_cast<float>(rawBuffer[sampleIndex * 2 + 1]) / 32768.0f);
+                }
+            } else {
+                m_atomicBombSamplesL.reserve(totalSamples);
+                m_atomicBombSamplesR.reserve(totalSamples);
+                for (size_t sampleIndex = 0; sampleIndex < totalSamples; ++sampleIndex) {
+                    const float sampleVal = static_cast<float>(rawBuffer[sampleIndex]) / 32768.0f;
+                    m_atomicBombSamplesL.push_back(sampleVal);
+                    m_atomicBombSamplesR.push_back(sampleVal);
+                }
+            }
+
+            std::cout << "[SoundSystem] Sonido de explosion atomica cargado con exito: " << filePath
+                      << " (" << m_atomicBombSamplesL.size() << " frames, "
+                      << (static_cast<float>(m_atomicBombSamplesL.size()) / 44100.0f) << "s)" << std::endl;
+            return true;
+        } else {
+            audioFile.seekg(chunkSize, std::ios::cur);
+        }
+    }
+    return false;
 }
 
 void SoundSystem::shutdown() {
@@ -183,6 +269,12 @@ void SoundSystem::playSFX(SFXType type, float volume, float pan, float pitch) {
         case SFXType::EraAscension:  inst.duration = 3.20f; break;
         case SFXType::CombatAttack:  inst.duration = 0.22f; break;
         case SFXType::UnitDeath:     inst.duration = 0.65f; break;
+        case SFXType::AtomicExplosion: {
+            inst.duration = !m_atomicBombSamplesL.empty()
+                ? (static_cast<float>(m_atomicBombSamplesL.size()) / 44100.0f)
+                : 8.0f;
+            break;
+        }
     }
 
     m_activeSFX.push_back(inst);
@@ -199,7 +291,10 @@ void SoundSystem::playSpatialSFX(SFXType type, float worldX, float worldY,
     float dy = worldY - static_cast<float>(camGy);
     float dist = std::hypot(dx, dy);
 
-    if (dist > 45.0f) return; // Fuera del radio audible de la cámara
+    // EN: Nuclear explosions are cataclysmic events audible across the entire continent
+    // ES: Las explosiones nucleares son eventos cataclísmicos audibles a través de todo el continente
+    const float maxAudibleDist = (type == SFXType::AtomicExplosion) ? 350.0f : 45.0f;
+    if (dist > maxAudibleDist) return;
 
     // Paneo estéreo según proyección en pantalla
     Vec2 scr = camera.gridToScreen(worldX, worldY);
@@ -207,8 +302,13 @@ void SoundSystem::playSpatialSFX(SFXType type, float worldX, float worldY,
     pan = std::clamp(pan, -0.9f, 0.9f);
 
     // Atenuación cuadrática suave con la distancia
-    float distAtten = 1.0f / (1.0f + (dist / 14.0f) * (dist / 14.0f));
+    const float attenScale = (type == SFXType::AtomicExplosion) ? 65.0f : 14.0f;
+    float distAtten = 1.0f / (1.0f + (dist / attenScale) * (dist / attenScale));
     float finalVol = volume * distAtten;
+
+    if (type == SFXType::AtomicExplosion) {
+        finalVol = std::max(finalVol, volume * 0.35f); // EN: Minimum continental rumble floor / ES: Suelo mínimo de retumbar continental
+    }
 
     if (finalVol > 0.015f) {
         playSFX(type, finalVol, pan, pitch);
@@ -281,8 +381,9 @@ void SoundSystem::update(float dt,
             if (fx.type == DivinePowerType::Meteor ||
                 fx.type == DivinePowerType::Tornado ||
                 fx.type == DivinePowerType::Earthquake ||
-                fx.type == DivinePowerType::Lightning) {
-                disasterBoost += 0.40f;
+                fx.type == DivinePowerType::Lightning ||
+                fx.type == DivinePowerType::AtomicBomb) {
+                disasterBoost += (fx.type == DivinePowerType::AtomicBomb) ? 0.85f : 0.40f;
             }
         }
     }
@@ -724,6 +825,40 @@ void SoundSystem::renderSFXInstance(ActiveSFXInstance& sfx, float dt, float& out
             float env = std::max(0.0f, 1.0f - progress);
             float sigh = std::sin(t * (180.0f - progress * 80.0f) * 2.0f * 3.14159f);
             sig = sigh * env * 0.6f;
+            break;
+        }
+        case SFXType::AtomicExplosion: {
+            // EN: High-fidelity stereo PCM playback of authentic atomic explosion audio
+            // ES: Reproducción estéreo PCM de alta fidelidad del audio auténtico de explosión atómica
+            if (!m_atomicBombSamplesL.empty()) {
+                const float exactSamplePos = sfx.elapsed * 44100.0f * sfx.pitch;
+                const size_t sampleIndex = static_cast<size_t>(exactSamplePos);
+                if (sampleIndex < m_atomicBombSamplesL.size()) {
+                    const float fraction = exactSamplePos - static_cast<float>(sampleIndex);
+                    const float sampleL1 = m_atomicBombSamplesL[sampleIndex];
+                    const float sampleR1 = m_atomicBombSamplesR[sampleIndex];
+                    const float sampleL2 = (sampleIndex + 1 < m_atomicBombSamplesL.size()) ? m_atomicBombSamplesL[sampleIndex + 1] : sampleL1;
+                    const float sampleR2 = (sampleIndex + 1 < m_atomicBombSamplesR.size()) ? m_atomicBombSamplesR[sampleIndex + 1] : sampleR1;
+
+                    const float rawSampleL = sampleL1 * (1.0f - fraction) + sampleL2 * fraction;
+                    const float rawSampleR = sampleR1 * (1.0f - fraction) + sampleR2 * fraction;
+
+                    // Paneo estéreo de potencia constante
+                    const float panNorm = (sfx.pan + 1.0f) * 0.5f;
+                    const float panL = std::cos(panNorm * 1.57079f);
+                    const float panR = std::sin(panNorm * 1.57079f);
+
+                    outL = rawSampleL * sfx.volume * panL * 1.75f;
+                    outR = rawSampleR * sfx.volume * panR * 1.75f;
+                    return;
+                }
+            }
+            // EN: Fallback procedural DSP synthesis if audio asset is not loaded
+            // ES: Síntesis procedural DSP de respaldo si el recurso de audio no está cargado
+            float blast = (progress < 0.15f) ? (fastNoise(m_noiseSeed) * 2.2f) : 0.0f;
+            float subRumble = std::sin(t * (24.0f + 16.0f * (1.0f - progress)) * 2.0f * 3.14159f);
+            float env = std::max(0.0f, 1.0f - progress * 0.25f);
+            sig = (blast + subRumble * 1.5f + fastNoise(m_noiseSeed) * 0.6f) * env * 1.5f;
             break;
         }
     }

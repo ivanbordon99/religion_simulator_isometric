@@ -17,6 +17,7 @@ enum class BiomeID : std::uint8_t {
     TropicalRainforest,
     SnowyMountain,
     RockyPeak,
+    VolcanicCaldera,
     Count
 };
 
@@ -42,7 +43,7 @@ struct TileBiomeData {
 class MultiNoiseBiomeGenerator {
 public:
     static constexpr float COOLING_FACTOR = 0.42f;
-    static constexpr std::array<BiomeTarget, 10> BIOME_TARGETS{{
+    static constexpr std::array<BiomeTarget, 11> BIOME_TARGETS{{
         {BiomeID::Ocean,             0.05f,  0.00f, -0.78f, 0.45f, 0.45f, 3.00f},
         {BiomeID::Coast,             0.15f, -0.10f, -0.34f, 0.45f, 0.65f, 2.40f},
         {BiomeID::Desert,            0.72f, -0.78f, -0.04f, 1.35f, 1.45f, 0.55f},
@@ -52,7 +53,8 @@ public:
         {BiomeID::Taiga,            -0.55f,  0.22f,  0.20f, 1.10f, 0.75f, 0.65f},
         {BiomeID::TropicalRainforest,0.78f,  0.82f,  0.00f, 1.15f, 1.10f, 0.50f},
         {BiomeID::SnowyMountain,    -0.82f,  0.20f,  0.82f, 1.10f, 0.65f, 1.55f},
-        {BiomeID::RockyPeak,        -0.18f, -0.08f,  0.90f, 0.50f, 0.45f, 1.65f}
+        {BiomeID::RockyPeak,        -0.18f, -0.08f,  0.90f, 0.50f, 0.45f, 1.65f},
+        {BiomeID::VolcanicCaldera,   0.85f, -0.50f,  0.95f, 2.80f, 1.50f, 2.50f}
     }};
 
     static TileBiomeData sample(int x, int y, int width, int height, std::uint32_t seed, WorldClimate climate = WorldClimate::Templado);

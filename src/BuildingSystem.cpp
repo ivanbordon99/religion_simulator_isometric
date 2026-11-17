@@ -222,9 +222,71 @@ void BuildingSystem::destroyHouse(int houseId, WorldMap& worldMap, GestorHumanos
     }
 }
 
+// EN: Apply physical damage to house structure, triggering collapse into ruins when depleted
+// ES: Aplicar daño físico a la estructura de la vivienda, provocando colapso en ruinas al agotarse
+bool BuildingSystem::damageHouse(int houseId, float damageAmount, WorldMap& worldMap, GestorHumanos* villagerManager) {
+    if (houseId <= 0 || damageAmount <= 0.0f) return false;
+
+    House* targetHouse = getHouseByIdMutable(houseId);
+    if (!targetHouse) return false;
+
+    targetHouse->health = std::max(0.0f, targetHouse->health - damageAmount);
+
+    // EN: If structural integrity reaches 0, collapse into ruins
+    // ES: Si la integridad estructural llega a 0, colapsar en ruinas
+    if (targetHouse->health <= 0.0f && targetHouse->state != BuildingState::Ruined) {
+        targetHouse->state = BuildingState::Ruined;
+        targetHouse->comfort = 0.0f;
+
+        if (worldMap.isValid(targetHouse->cellX, targetHouse->cellY)) {
+            Cell& targetCell = worldMap.getCell(targetHouse->cellX, targetHouse->cellY);
+            targetCell.hasHouse = true; // Permanece como ruina visible
+        }
+
+        if (villagerManager) {
+            for (auto& villager : villagerManager->getHumanos()) {
+                if (villager.getHomeId() == houseId) {
+                    villager.setHomeId(-1);
+                    const bool wasSheltered = villager.estaDurmiendoBajoTecho();
+                    villager.setDurmiendoBajoTecho(false);
+                    villager.setNeedForShelter(1.0f);
+
+                    if (wasSheltered && villager.estaVivo()) {
+                        // EN: Structural collapse trauma to sheltered occupants
+                        // ES: Trauma por colapso estructural a los ocupantes cobijados
+                        villager.recibirDano(28.0f);
+                        villager.activarRagdoll(0.0f, 0.0f, 10.0f, 6.0f);
+                        villager.huirEnPanicoDesde(static_cast<float>(targetHouse->cellX) + 0.5f,
+                                                   static_cast<float>(targetHouse->cellY) + 0.5f, 6.0f);
+                    }
+                }
+            }
+        }
+        return true;
+    }
+    return false;
+}
+
+bool BuildingSystem::damageHouseAt(int cellX, int cellY, float damageAmount, WorldMap& worldMap, GestorHumanos* villagerManager) {
+    House* targetHouse = getHouseAtMutable(cellX, cellY);
+    if (!targetHouse) return false;
+    return damageHouse(targetHouse->id, damageAmount, worldMap, villagerManager);
+}
+
 void BuildingSystem::clear() {
     m_houses.clear();
     m_nextHouseId = 1;
+}
+
+// =============================================================================
+// EN: Directly register an externally restored or deserialized house structure
+// ES: Registrar directamente una estructura de vivienda restaurada externamente o deserializada
+// =============================================================================
+void BuildingSystem::addHouseDirect(const House& house) {
+    m_houses.push_back(house);
+    if (house.id >= m_nextHouseId) {
+        m_nextHouseId = house.id + 1;
+    }
 }
 
 int BuildingSystem::getCompletedHouseCount() const {
